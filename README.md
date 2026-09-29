@@ -91,6 +91,14 @@ npm run desktop:build   # produce an installer at electron\release (unsigned —
 
 Both builds point at whatever `EXPO_PUBLIC_API_URL`/`EXPO_PUBLIC_DEMO` are set to in `.env` at build time. For solo use, the Python API can just run on your own PC — no hosting required — with the phone reaching it over your LAN (or a tool like Tailscale if you want access away from home).
 
+## Deploy the web app to Vercel
+
+Vercel can only host the static **web client** ([vercel.json](vercel.json) runs `npm run export` and serves `dist/`) — not the Python API. That server holds a persistent background queue and writes SQLite/audio files to local disk that must survive restarts, which is incompatible with Vercel's serverless, ephemeral-disk model (same reason covered under "Start the API": it needs a real VPS with a persistent volume, not a serverless host).
+
+1. [vercel.com/new](https://vercel.com/new) → **Import Git Repository** → pick `coderegtech/musika-app`. Vercel auto-detects `vercel.json`; no manual build settings needed. Or from the CLI: `npx vercel login` then `npx vercel --prod`.
+2. **Leave `EXPO_PUBLIC_DEMO` unset** (or explicitly `true`) in the Vercel project's Environment Variables if you just want a public, self-contained demo — it needs no API/credentials at all, since `EXPO_PUBLIC_DEMO` defaults to `true` when unset.
+3. To deploy the **real** app instead, set `EXPO_PUBLIC_DEMO=false` and `EXPO_PUBLIC_API_URL=<your deployed API's HTTPS URL>` as Vercel Environment Variables (Project → Settings → Environment Variables), then redeploy. Like the EAS builds, Vercel's build never sees your local, gitignored `.env` — every `EXPO_PUBLIC_*` value the deployed site needs has to be set there instead. Also add the Vercel deployment's exact origin (e.g. `https://musika-app.vercel.app`) to the API server's `MUSIKA_ORIGINS`, and as an authorized JavaScript origin on the Google **Web** OAuth client (step 5 above).
+
 ## What is implemented
 
 - Google native SDK sign-in / Google Identity Services on web, backend token verification, secure sessions, restore, expiry, logout, and error states.
