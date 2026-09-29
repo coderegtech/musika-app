@@ -23,24 +23,27 @@ npm run web
 
 ## Connect Google and YouTube
 
-Every credential below is free — Google OAuth has no cost at any scale, and the YouTube Data API is quota-limited (10,000 free units/day by default; a search costs 100) rather than pay-per-use. Do this once at [console.cloud.google.com](https://console.cloud.google.com); each step names the exact `.env` key(s) it fills in. Copy `.env.example` to `.env` first if you haven't.
+Every credential below is free — Google OAuth has no cost at any scale, and the YouTube Data API is quota-limited (10,000 free units/day by default; a search costs 100) rather than pay-per-use. Do this once at [console.cloud.google.com](https://console.cloud.google.com); each step names the exact env key(s) it fills in and **which of the two `.env` files** it goes in:
+
+- Root `.env` (copy from `.env.example`) — client config, read by Expo/EAS/Electron at build time.
+- `server/.env` (copy from `server/.env.example`) — server-only secrets, read only by the API. Never put one of these values in the root `.env`, or vice versa.
 
 | # | Console step | Fills in |
 |---|---|---|
 | 1 | New project (or pick an existing one). | — |
 | 2 | **APIs & Services → Library** → enable "YouTube Data API v3". | — |
-| 3 | **APIs & Services → Credentials → Create Credentials → API key.** Restrict it: API restrictions → YouTube Data API v3 only; application restrictions → your server's IP once deployed (leave unrestricted only for local testing). | `YOUTUBE_API_KEY` (server only — never an `EXPO_PUBLIC_` var) |
+| 3 | **APIs & Services → Credentials → Create Credentials → API key.** Restrict it: API restrictions → YouTube Data API v3 only; application restrictions → your server's IP once deployed (leave unrestricted only for local testing). | `YOUTUBE_API_KEY` in **`server/.env`** — never in the root `.env` or any `EXPO_PUBLIC_` var |
 | 4 | **APIs & Services → OAuth consent screen** → External → app name "Musika", your email as contact. Leave scopes at the default (openid/email/profile) — Musika never requests YouTube-account access. Leave **Publishing status: Testing** and add yourself under "Test users" — this skips Google's verification review entirely for personal use (up to 100 test users). | — |
-| 5 | **Create Credentials → OAuth client ID → Web application.** Authorized JavaScript origins: `http://localhost:8081` (Expo web dev), plus `http://127.0.0.1:17321` if you'll use the Electron desktop build, plus your production HTTPS origin if you deploy one. | `GOOGLE_CLIENT_ID` **and** `EXPO_PUBLIC_GOOGLE_WEB_CLIENT_ID` (same value in both — the server verifies tokens against it, the web client requests them with it) |
-| 6 | **Create Credentials → OAuth client ID → Android.** Package name `app.musika.mobile` (already set in `app.config.ts`). SHA-1: run `npx eas credentials` → Android → your build profile → view the keystore, or get it after your first `npm run build:android`. | `GOOGLE_ANDROID_CLIENT_ID` (no client-side var needed — native Google Sign-In matches by package name + SHA-1, not by ID in code) |
-| 7 | **Create Credentials → OAuth client ID → iOS** (only if you'll build for iOS — needs a Mac). Bundle ID `app.musika.mobile`. | `GOOGLE_IOS_CLIENT_ID` and `EXPO_PUBLIC_GOOGLE_IOS_CLIENT_ID` (same value); `GOOGLE_IOS_URL_SCHEME` is that ID with its segments reversed, e.g. `123-abc.apps.googleusercontent.com` → `com.googleusercontent.apps.123-abc` |
-| 8 | Add your own Google account email. | `ADMIN_EMAILS` — lets that signed-in account call `/admin/authorized-videos` to approve videos for download live, without a server restart. `AUTHORIZED_VIDEO_IDS` can stay blank; it's only a fixed fallback seed list. |
-| 9 | Point the client at your running server. | `EXPO_PUBLIC_API_URL` — a physical device needs a real reachable address, not `localhost`. `MUSIKA_ORIGINS` — comma-separated exact browser origins allowed to call the API (needed for the HTTP-only session cookie's CORS/CSRF check). |
-| 10 | Once 1–9 are filled in, flip demo mode off. | `EXPO_PUBLIC_DEMO=false` |
+| 5 | **Create Credentials → OAuth client ID → Web application.** Authorized JavaScript origins: `http://localhost:8081` (Expo web dev), plus `http://127.0.0.1:17321` if you'll use the Electron desktop build, plus your production HTTPS origin if you deploy one. | `GOOGLE_CLIENT_ID` in **`server/.env`** and `EXPO_PUBLIC_GOOGLE_WEB_CLIENT_ID` in the **root `.env`** (same value in both — the server verifies tokens against it, the web client requests them with it) |
+| 6 | **Create Credentials → OAuth client ID → Android.** Package name `app.musika.mobile` (already set in `app.config.ts`). SHA-1: run `npx eas credentials` → Android → your build profile → view the keystore, or get it after your first `npm run build:android`. | `GOOGLE_ANDROID_CLIENT_ID` in **`server/.env`** (no client-side var needed — native Google Sign-In matches by package name + SHA-1, not by ID in code) |
+| 7 | **Create Credentials → OAuth client ID → iOS** (only if you'll build for iOS — needs a Mac). Bundle ID `app.musika.mobile`. | `GOOGLE_IOS_CLIENT_ID` in **`server/.env`**; `EXPO_PUBLIC_GOOGLE_IOS_CLIENT_ID` (same value) and `GOOGLE_IOS_URL_SCHEME` (that ID with its segments reversed, e.g. `123-abc.apps.googleusercontent.com` → `com.googleusercontent.apps.123-abc`) in the **root `.env`** |
+| 8 | Add your own Google account email. | `ADMIN_EMAILS` in **`server/.env`** — lets that signed-in account call `/admin/authorized-videos` to approve videos for download live, without a server restart. `AUTHORIZED_VIDEO_IDS` (also `server/.env`) can stay blank; it's only a fixed fallback seed list. |
+| 9 | Point the client at your running server. | `EXPO_PUBLIC_API_URL` in the **root `.env`** — a physical device needs a real reachable address, not `localhost`. `MUSIKA_ORIGINS` in **`server/.env`** — comma-separated exact browser origins allowed to call the API (needed for the HTTP-only session cookie's CORS/CSRF check). |
+| 10 | Once 1–9 are filled in, flip demo mode off. | `EXPO_PUBLIC_DEMO=false` in the **root `.env`** |
 
 `EXPO_PUBLIC_*` values are inlined into the JS bundle at build time, not read at runtime — restart `expo start` / rebuild after changing any of them.
 
-**Cloud Android builds can't see your local `.env`.** `npx eas build` runs on Expo's own servers, and `.env` is gitignored, so it never uploads. Any `EXPO_PUBLIC_*` value the APK needs (the web/iOS client IDs, `EXPO_PUBLIC_API_URL`, `EXPO_PUBLIC_DEMO`) must also be set as an `"env"` block on the build profile in `eas.json`, e.g.:
+**Cloud Android builds can't see your local root `.env`.** `npx eas build` runs on Expo's own servers, and `.env` is gitignored, so it never uploads. Any `EXPO_PUBLIC_*` value the APK needs (the web/iOS client IDs, `EXPO_PUBLIC_API_URL`, `EXPO_PUBLIC_DEMO`) must also be set as an `"env"` block on the build profile in `eas.json`, e.g.:
 
 ```json
 "preview": {
@@ -50,15 +53,15 @@ Every credential below is free — Google OAuth has no cost at any scale, and th
 }
 ```
 
-These are all public client identifiers (that's what `EXPO_PUBLIC_` means), so committing them to `eas.json` is fine — never put `YOUTUBE_API_KEY` or any server-only var there. The server reads its own local `.env` directly and never goes through EAS.
+These are all public client identifiers (that's what `EXPO_PUBLIC_` means), so committing them to `eas.json` is fine — never put `YOUTUBE_API_KEY` or any other `server/.env` value there. The server never goes through EAS at all; it reads `server/.env` directly.
 
-For production, also set `ENVIRONMENT=production` (requires secure cookies) and serve the frontend/API from the same site over HTTPS (the session cookie is same-site, HTTP-only).
+For production, also set `ENVIRONMENT=production` in `server/.env` (requires secure cookies) and serve the frontend/API from the same site over HTTPS (the session cookie is same-site, HTTP-only).
 
 Only basic Google identity scopes are used. Discovery uses the server API key and does not request access to the user's YouTube account. Google ID tokens are verified server-side against configured audiences and exchanged for random, revocable, 30-day Musika sessions. Native tokens use SecureStore; browser sessions use HTTP-only cookies. Authentication failure clears the native token and prompts reauthentication.
 
 ## Start the API
 
-Requirements: Python 3.11+ and the dependencies below. The virtual environment installs yt-dlp and a bundled FFmpeg executable through imageio-ffmpeg. An existing FFmpeg on PATH takes precedence; optional executable overrides are in `.env.example`. Run one API worker so the queue's global concurrency cap remains three.
+Requirements: Python 3.11+ and the dependencies below. Copy `server/.env.example` to `server/.env` and fill it in (see the credential table above) — `server/main.py` loads that file specifically, not the root one. The virtual environment installs yt-dlp and a bundled FFmpeg executable through imageio-ffmpeg. An existing FFmpeg on PATH takes precedence; optional executable overrides are in `server/.env.example`. Run one API worker so the queue's global concurrency cap remains three.
 
 ```powershell
 python -m venv .venv
@@ -70,7 +73,7 @@ API reference: http://localhost:8000/docs. Runtime databases and media live in `
 
 ### Or run it in Docker
 
-[server/Dockerfile](server/Dockerfile) is self-contained — `server/` is the whole build context, so it's a unit you can deploy on its own (see VPS section below) without the rest of the monorepo. No local Python/venv needed either way; `ffmpeg` is installed on `PATH` in the image, so it starts instantly instead of downloading a binary on first request.
+[server/Dockerfile](server/Dockerfile) is self-contained — `server/` (including its own `server/.env`) is the whole build context, so it's a unit you can deploy on its own (see VPS section below) without the rest of the monorepo. No local Python/venv needed either way; `ffmpeg` is installed on `PATH` in the image, so it starts instantly instead of downloading a binary on first request.
 
 Locally, via the root [docker-compose.yml](docker-compose.yml):
 
@@ -81,24 +84,24 @@ docker compose down           # stop (data in server/data/ persists in the musik
 docker compose down -v        # stop AND wipe that data, for a fully disposable/temporary run
 ```
 
-It reads the same root `.env` (via `env_file`) as the venv-based run above — nothing extra to configure. The container listens on `8000` internally, published as `8010` to match `EXPO_PUBLIC_API_URL` in `.env`; edit the `ports:` mapping if you'd rather use a different host port.
+It reads `server/.env` (via `env_file`) — the same file the venv-based run above uses, nothing extra to configure. The container listens on `8000` internally, published as `8010` to match `EXPO_PUBLIC_API_URL` in the root `.env`; edit the `ports:` mapping if you'd rather use a different host port.
 
 ### Deploy the API to a VPS with Docker
 
-1. Get `server/` and a filled-in `.env` onto the VPS — either `git clone` the whole repo, or just `scp` the `server/` folder plus `.env` if you don't want the rest of the project there.
+1. Get `server/` onto the VPS — either `git clone` the whole repo, or just `scp` the `server/` folder if you don't want the rest of the project there. Either way, create `server/.env` on the VPS itself (copy `server/.env.example` and fill it in) — that one folder is now fully self-contained.
 2. [Install Docker](https://docs.docker.com/engine/install/) on the VPS (most distros: `curl -fsSL https://get.docker.com | sh`).
 3. Build and run:
    ```bash
    cd server
    docker build -t musika-api .
    docker run -d --name musika-api --restart unless-stopped \
-     -p 8000:8000 --env-file ../.env -v musika_data:/app/server/data \
+     -p 8000:8000 --env-file .env -v musika_data:/app/server/data \
      musika-api
    ```
    (`--restart unless-stopped` brings it back up after a VPS reboot or crash; the image has a built-in `HEALTHCHECK` against `/health` that `docker ps` will report.)
 4. Put it behind a reverse proxy for HTTPS — the app needs a real TLS origin for the session cookie and CORS to work correctly in production. [Caddy](https://caddyserver.com/) is the least setup for this: point a domain's A record at the VPS, then a two-line Caddyfile (`your-domain.com { reverse_proxy localhost:8000 }`) gets you automatic Let's Encrypt certificates.
-5. Update `.env` on the VPS for production: `ENVIRONMENT=production` (requires secure cookies), `MUSIKA_ORIGINS` set to your actual frontend origin(s) (e.g. your Vercel URL), and the Google OAuth Web client's authorized origins to match.
-6. Point the client at it: set `EXPO_PUBLIC_API_URL=https://your-domain.com` wherever the frontend is built (`.env` for local/Electron/EAS builds — see the EAS and Vercel notes above about their own env-var mechanisms — since it's a public HTTPS URL now, a physical device or the Vercel deployment can reach it too, not just your LAN).
+5. Update `server/.env` on the VPS for production: `ENVIRONMENT=production` (requires secure cookies), `MUSIKA_ORIGINS` set to your actual frontend origin(s) (e.g. your Vercel URL), and the Google OAuth Web client's authorized origins to match.
+6. Point the client at it: set `EXPO_PUBLIC_API_URL=https://your-domain.com` wherever the frontend is built (root `.env` for local/Electron builds, `eas.json`'s `env` block for EAS, Vercel's Environment Variables for the web deploy — see those sections below) — since it's a public HTTPS URL now, a physical device or the Vercel deployment can reach it too, not just your LAN.
 
 ## Personal builds (Android APK / Windows desktop)
 

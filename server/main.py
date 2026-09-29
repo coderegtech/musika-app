@@ -19,7 +19,7 @@ from .domain import VIDEO_ID, DuplicateDetectionService
 from .downloads import QueueService
 from .youtube import YouTubeService
 
-load_dotenv()
+load_dotenv(Path(__file__).parent/'.env')
 ROOT = Path(__file__).parent/'data'
 db = Database(ROOT/'musika.db')
 youtube = YouTubeService()

@@ -2,3 +2,5 @@ data/
 __pycache__/
 *.pyc
 tests/
+# Injected at container runtime via --env-file / env_file, never baked in.
+.env
