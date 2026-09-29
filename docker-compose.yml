@@ -1,6 +1,7 @@
 services:
   api:
-    build: .
+    build:
+      context: ./server
     ports:
       - "8010:8000"
     env_file:

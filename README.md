@@ -70,7 +70,9 @@ API reference: http://localhost:8000/docs. Runtime databases and media live in `
 
 ### Or run it in Docker
 
-No local Python/venv needed — `ffmpeg` is installed on `PATH` in the image, so it starts instantly instead of downloading a binary on first request.
+[server/Dockerfile](server/Dockerfile) is self-contained — `server/` is the whole build context, so it's a unit you can deploy on its own (see VPS section below) without the rest of the monorepo. No local Python/venv needed either way; `ffmpeg` is installed on `PATH` in the image, so it starts instantly instead of downloading a binary on first request.
+
+Locally, via the root [docker-compose.yml](docker-compose.yml):
 
 ```powershell
 docker compose up -d          # build + start, http://localhost:8010
@@ -79,7 +81,24 @@ docker compose down           # stop (data in server/data/ persists in the musik
 docker compose down -v        # stop AND wipe that data, for a fully disposable/temporary run
 ```
 
-It reads the same root `.env` (via `env_file` in [docker-compose.yml](docker-compose.yml)) as the venv-based run above — nothing extra to configure. The container listens on `8000` internally, published as `8010` to match `EXPO_PUBLIC_API_URL` in `.env`; edit the `ports:` mapping in `docker-compose.yml` if you'd rather use a different host port.
+It reads the same root `.env` (via `env_file`) as the venv-based run above — nothing extra to configure. The container listens on `8000` internally, published as `8010` to match `EXPO_PUBLIC_API_URL` in `.env`; edit the `ports:` mapping if you'd rather use a different host port.
+
+### Deploy the API to a VPS with Docker
+
+1. Get `server/` and a filled-in `.env` onto the VPS — either `git clone` the whole repo, or just `scp` the `server/` folder plus `.env` if you don't want the rest of the project there.
+2. [Install Docker](https://docs.docker.com/engine/install/) on the VPS (most distros: `curl -fsSL https://get.docker.com | sh`).
+3. Build and run:
+   ```bash
+   cd server
+   docker build -t musika-api .
+   docker run -d --name musika-api --restart unless-stopped \
+     -p 8000:8000 --env-file ../.env -v musika_data:/app/server/data \
+     musika-api
+   ```
+   (`--restart unless-stopped` brings it back up after a VPS reboot or crash; the image has a built-in `HEALTHCHECK` against `/health` that `docker ps` will report.)
+4. Put it behind a reverse proxy for HTTPS — the app needs a real TLS origin for the session cookie and CORS to work correctly in production. [Caddy](https://caddyserver.com/) is the least setup for this: point a domain's A record at the VPS, then a two-line Caddyfile (`your-domain.com { reverse_proxy localhost:8000 }`) gets you automatic Let's Encrypt certificates.
+5. Update `.env` on the VPS for production: `ENVIRONMENT=production` (requires secure cookies), `MUSIKA_ORIGINS` set to your actual frontend origin(s) (e.g. your Vercel URL), and the Google OAuth Web client's authorized origins to match.
+6. Point the client at it: set `EXPO_PUBLIC_API_URL=https://your-domain.com` wherever the frontend is built (`.env` for local/Electron/EAS builds — see the EAS and Vercel notes above about their own env-var mechanisms — since it's a public HTTPS URL now, a physical device or the Vercel deployment can reach it too, not just your LAN).
 
 ## Personal builds (Android APK / Windows desktop)
 
