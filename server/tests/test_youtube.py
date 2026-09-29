@@ -12,6 +12,15 @@ class YouTubeTests(unittest.IsolatedAsyncioTestCase):
         result=await service.searchMusic('song','PAGE')
         service.request.assert_awaited_once_with('search',part='snippet',type='video',videoCategoryId='10',q='song',maxResults=20,pageToken='PAGE')
         self.assertEqual(result['nextPageToken'],'NEXT');self.assertEqual(len(result['items']),1)
+    async def test_search_skips_results_without_a_video_id(self):
+        # YouTube's search API occasionally returns non-video items even with
+        # type=video; these must be skipped rather than crashing the request.
+        service=YouTubeService()
+        service.request=AsyncMock(return_value={'items':[{'id':{'kind':'youtube#channel','channelId':'x'}},{'id':{'videoId':'abcdefghijk'}}]})
+        service.getVideos=AsyncMock(return_value=[{'id':'abcdefghijk','classification':'MUSIC'}])
+        result=await service.searchMusic('song')
+        service.getVideos.assert_awaited_once_with(['abcdefghijk'])
+        self.assertEqual(len(result['items']),1)
     async def test_metadata_requests_batch_at_fifty(self):
         service=YouTubeService();service.request=AsyncMock(return_value={'items':[]})
         await service.getVideos([f'{i:011d}' for i in range(115)])

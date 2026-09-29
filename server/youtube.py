@@ -55,7 +55,8 @@ class YouTubeService:
 
     async def searchMusic(self, query, page=''):
         result = await self.request('search', part='snippet', type='video', videoCategoryId='10', q=query, maxResults=20, pageToken=page)
-        tracks = await self.getVideos([v['id']['videoId'] for v in result.get('items',[])])
+        ids = [v['id']['videoId'] for v in result.get('items',[]) if v.get('id',{}).get('videoId')]
+        tracks = await self.getVideos(ids)
         return {'items': sorted([t for t in tracks if t['classification'] != 'NOT_MUSIC'], key=lambda t:t['classification']!='MUSIC'), 'nextPageToken':result.get('nextPageToken')}
 
     async def discover(self):
@@ -65,7 +66,8 @@ class YouTubeService:
 
     async def searchPlaylists(self, query, page=''):
         result = await self.request('search', part='snippet',type='playlist',q=query+' music',maxResults=20,pageToken=page)
-        return {'items':[{'id':v['id']['playlistId'],'title':v['snippet']['title'],'artist':v['snippet']['channelTitle'],'thumbnail':v['snippet']['thumbnails'].get('high',v['snippet']['thumbnails']['default'])['url']} for v in result.get('items',[])], 'nextPageToken':result.get('nextPageToken')}
+        items = [v for v in result.get('items',[]) if v.get('id',{}).get('playlistId')]
+        return {'items':[{'id':v['id']['playlistId'],'title':v['snippet']['title'],'artist':v['snippet']['channelTitle'],'thumbnail':v['snippet']['thumbnails'].get('high',v['snippet']['thumbnails']['default'])['url']} for v in items], 'nextPageToken':result.get('nextPageToken')}
 
     async def getPlaylist(self, playlist_id):
         return await self.request('playlists', part='snippet,contentDetails', id=playlist_id)
