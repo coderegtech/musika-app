@@ -68,6 +68,19 @@ python -m venv .venv
 
 API reference: http://localhost:8000/docs. Runtime databases and media live in `server/data/` and are ignored by Git. Configure HTTPS and durable storage before deploying. Do not run multiple queue workers against the same database; distributed job leasing is outside this implementation.
 
+### Or run it in Docker
+
+No local Python/venv needed — `ffmpeg` is installed on `PATH` in the image, so it starts instantly instead of downloading a binary on first request.
+
+```powershell
+docker compose up -d          # build + start, http://localhost:8010
+docker compose logs -f        # watch it
+docker compose down           # stop (data in server/data/ persists in the musika_data volume)
+docker compose down -v        # stop AND wipe that data, for a fully disposable/temporary run
+```
+
+It reads the same root `.env` (via `env_file` in [docker-compose.yml](docker-compose.yml)) as the venv-based run above — nothing extra to configure. The container listens on `8000` internally, published as `8010` to match `EXPO_PUBLIC_API_URL` in `.env`; edit the `ports:` mapping in `docker-compose.yml` if you'd rather use a different host port.
+
 ## Personal builds (Android APK / Windows desktop)
 
 Building your own APK or desktop app for personal use needs no Play Store, App Store, or code-signing certificate — those are only required to *publish* through a store.

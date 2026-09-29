@@ -17,3 +17,9 @@ electron/web/
 electron/release/
 electron/icon.ico
 electron/icon.png
+
+.vercel
+
+# EAS/keystore secrets — signing keystore + its passwords. Never commit these.
+credentials.json
+credentials/
