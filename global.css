@@ -1,0 +1,9 @@
+@tailwind base;
+@tailwind components;
+@tailwind utilities;
+html, body, #root { height: 100%; background: #F5F2E9; }
+body { margin: 0; }
+* { box-sizing: border-box; }
+input { outline: none; }
+::-webkit-scrollbar { width: 5px; height: 4px; }
+::-webkit-scrollbar-thumb { background: #c8ccbd; border-radius: 10px; }

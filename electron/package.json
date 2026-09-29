@@ -1,0 +1,33 @@
+{
+  "name": "musika-desktop",
+  "version": "1.0.0",
+  "private": true,
+  "description": "Musika desktop shell (wraps the Expo web export in a native window).",
+  "main": "main.js",
+  "scripts": {
+    "prepare:web": "node copy-web.js",
+    "prepare:icon": "node make-icon.js",
+    "start": "npm run prepare:web && npm run prepare:icon && electron .",
+    "dist": "npm run prepare:web && npm run prepare:icon && electron-builder"
+  },
+  "devDependencies": {
+    "electron": "^33.2.1",
+    "electron-builder": "^25.1.8",
+    "png-to-ico": "^2.1.8"
+  },
+  "build": {
+    "appId": "app.musika.desktop",
+    "productName": "Musika",
+    "files": ["main.js", "icon.png", "web/**/*"],
+    "directories": { "output": "${env.LOCALAPPDATA}/MusikaBuild/release" },
+    "win": {
+      "target": ["nsis"],
+      "icon": "icon.ico",
+      "signAndEditExecutable": false
+    },
+    "nsis": {
+      "oneClick": false,
+      "allowToChangeInstallationDirectory": true
+    }
+  }
+}
