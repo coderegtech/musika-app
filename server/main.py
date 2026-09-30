@@ -15,7 +15,7 @@ from fastapi.middleware.cors import CORSMiddleware
 from fastapi.responses import FileResponse
 from pydantic import BaseModel, Field
 from .database import Database
-from .domain import VIDEO_ID, DuplicateDetectionService
+from .domain import VIDEO_ID, DuplicateDetectionService, parse_video_url
 from .downloads import QueueService
 from .youtube import YouTubeService
 
@@ -59,15 +59,6 @@ def session(request:Request):
         row = conn.execute('SELECT * FROM sessions WHERE token_hash=? AND expires>?',(digest,time.time())).fetchone()
     if not row: raise HTTPException(401,'Your session expired. Sign in again.')
     return row['user_id']
-
-def admin(user=Depends(session)):
-    admins = {e.strip().lower() for e in os.getenv('ADMIN_EMAILS','').split(',') if e.strip()}
-    with db.connect() as conn: profile = json.loads(conn.execute('SELECT profile FROM users WHERE id=?',(user,)).fetchone()['profile'])
-    if profile.get('email','').lower() not in admins: raise HTTPException(403,'This account cannot manage the download catalog.')
-    return user
-
-def authorized(video_id):
-    return video_id in os.getenv('AUTHORIZED_VIDEO_IDS','').split(',') or db.is_authorized(video_id)
 
 class GoogleLogin(BaseModel):
     idToken: str = Field(max_length=10000)
@@ -128,21 +119,23 @@ async def playlist(playlist_id:str,page:str='',user=Depends(session)):
 
 class DownloadRequest(BaseModel):
     video_id:str = Field(pattern=r'^[A-Za-z0-9_-]{11}$')
+    # Optional and never used to fetch anything: it is only checked against video_id, and yt-dlp always gets a URL the server builds.
+    url:str|None = Field(default=None,max_length=300)
+    playlist_id:str|None = Field(default=None,pattern=r'^[\w-]{1,64}$')
     format:Literal['mp3','m4a','opus']='mp3'
     quality:Literal[128,192,256,320]=320
-    permission_confirmed:bool=False
     allow_duplicate:bool=False
 
 @app.post('/downloads')
 async def download(body:DownloadRequest,user=Depends(session)):
-    if not body.permission_confirmed or not authorized(body.video_id):
-        raise HTTPException(403,'Only content you have permission to download and that is approved by the server can be saved.')
+    if body.url is not None and parse_video_url(body.url) != body.video_id:
+        raise HTTPException(400,'Only YouTube links that match the requested video are supported.')
     track = await youtube.getMusicMetadata(body.video_id)
     if track['classification']=='NOT_MUSIC': raise HTTPException(400,'This video is not classified as music.')
     duplicate = DuplicateDetectionService.check(track,db.tracks(user))
     if duplicate == 'ALREADY DOWNLOADED': return {'duplicate':duplicate,'track':track}
     if duplicate == 'POSSIBLE DUPLICATE' and not body.allow_duplicate: return {'duplicate':duplicate,'track':track}
-    job = {'id':uuid.uuid4().hex,'user_id':user,'track':track,'state':'QUEUED','progress':0,'format':body.format,'quality':body.quality,'allow_duplicate':body.allow_duplicate}
+    job = {'id':uuid.uuid4().hex,'user_id':user,'track':track,'state':'QUEUED','progress':0,'format':body.format,'quality':body.quality,'allow_duplicate':body.allow_duplicate,'playlist_id':body.playlist_id}
     try: db.save_job(job)
     except sqlite3.IntegrityError:
         return next(j for j in db.jobs(user) if j['track']['id']==body.video_id and j['state'] in ('QUEUED','ANALYZING','DOWNLOADING','PROCESSING'))
@@ -150,6 +143,12 @@ async def download(body:DownloadRequest,user=Depends(session)):
 
 @app.get('/downloads')
 def jobs(user=Depends(session)): return {'items':db.jobs(user),'paused':db.paused(user)}
+
+@app.get('/downloads/{download_id}')
+def download_status(download_id:str,user=Depends(session)):
+    job = next((j for j in db.jobs(user) if j['id']==download_id),None)
+    if not job: raise HTTPException(404,'Download not found.')
+    return {**{k:v for k,v in job.items() if k!='user_id'},'status':job['state'].lower(),'title':job['track']['title']}
 
 @app.post('/downloads/queue/{action}')
 def queue_action(action:str,user=Depends(session)):
@@ -175,24 +174,8 @@ async def job_action(job_id:str,action:str,user=Depends(session)):
         job.update(state='QUEUED',progress=0,error=None)
         try: db.save_job(job)
         except sqlite3.IntegrityError: raise HTTPException(409,'This track is already queued.')
+    elif action=='remove' and job['state'] in ('COMPLETED','SKIPPED','FAILED','CANCELLED'): db.delete_job(user,job_id)
     else: raise HTTPException(400,'This action is not available for this download.')
-    return {'ok':True}
-
-class AuthorizeVideo(BaseModel):
-    video_id:str = Field(pattern=r'^[A-Za-z0-9_-]{11}$')
-
-@app.get('/admin/authorized-videos')
-def list_authorized(user=Depends(admin)): return {'items':db.authorized_videos()}
-
-@app.post('/admin/authorized-videos')
-def add_authorized(body:AuthorizeVideo,user=Depends(admin)):
-    db.add_authorized(body.video_id,user)
-    return {'ok':True}
-
-@app.delete('/admin/authorized-videos/{video_id}')
-def remove_authorized(video_id:str,user=Depends(admin)):
-    if not VIDEO_ID.fullmatch(video_id): raise HTTPException(400,'Invalid YouTube video ID.')
-    db.remove_authorized(video_id)
     return {'ok':True}
 
 @app.get('/library')

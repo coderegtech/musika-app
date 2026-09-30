@@ -37,9 +37,8 @@ Every credential below is free — Google OAuth has no cost at any scale, and th
 | 5 | **Create Credentials → OAuth client ID → Web application.** Authorized JavaScript origins: `http://localhost:8081` (Expo web dev), plus `http://127.0.0.1:17321` if you'll use the Electron desktop build, plus your production HTTPS origin if you deploy one. | `GOOGLE_CLIENT_ID` in **`server/.env`** and `EXPO_PUBLIC_GOOGLE_WEB_CLIENT_ID` in the **root `.env`** (same value in both — the server verifies tokens against it, the web client requests them with it) |
 | 6 | **Create Credentials → OAuth client ID → Android.** Package name `app.musika.mobile` (already set in `app.config.ts`). SHA-1: run `npx eas credentials` → Android → your build profile → view the keystore, or get it after your first `npm run build:android`. | `GOOGLE_ANDROID_CLIENT_ID` in **`server/.env`** (no client-side var needed — native Google Sign-In matches by package name + SHA-1, not by ID in code) |
 | 7 | **Create Credentials → OAuth client ID → iOS** (only if you'll build for iOS — needs a Mac). Bundle ID `app.musika.mobile`. | `GOOGLE_IOS_CLIENT_ID` in **`server/.env`**; `EXPO_PUBLIC_GOOGLE_IOS_CLIENT_ID` (same value) and `GOOGLE_IOS_URL_SCHEME` (that ID with its segments reversed, e.g. `123-abc.apps.googleusercontent.com` → `com.googleusercontent.apps.123-abc`) in the **root `.env`** |
-| 8 | Add your own Google account email. | `ADMIN_EMAILS` in **`server/.env`** — lets that signed-in account call `/admin/authorized-videos` to approve videos for download live, without a server restart. `AUTHORIZED_VIDEO_IDS` (also `server/.env`) can stay blank; it's only a fixed fallback seed list. |
-| 9 | Point the client at your running server. | `EXPO_PUBLIC_API_URL` in the **root `.env`** — a physical device needs a real reachable address, not `localhost`. `MUSIKA_ORIGINS` in **`server/.env`** — comma-separated exact browser origins allowed to call the API (needed for the HTTP-only session cookie's CORS/CSRF check). |
-| 10 | Once 1–9 are filled in, flip demo mode off. | `EXPO_PUBLIC_DEMO=false` in the **root `.env`** |
+| 8 | Point the client at your running server. | `EXPO_PUBLIC_API_URL` in the **root `.env`** — a physical device needs a real reachable address, not `localhost`. `MUSIKA_ORIGINS` in **`server/.env`** — comma-separated exact browser origins allowed to call the API (needed for the HTTP-only session cookie's CORS/CSRF check). |
+| 9 | Once 1–8 are filled in, flip demo mode off. | `EXPO_PUBLIC_DEMO=false` in the **root `.env`** |
 
 `EXPO_PUBLIC_*` values are inlined into the JS bundle at build time, not read at runtime — restart `expo start` / rebuild after changing any of them.
 
@@ -142,20 +141,39 @@ Vercel can only host the static **web client** ([vercel.json](vercel.json) runs 
 - Details before download; local downloaded indicators; exact source-ID, normalized title/artist/duration, and post-download SHA-256 duplicate detection.
 - Playlist search and item pagination, per-track status, individual selection, select-new, and batch enqueueing.
 - Persistent server queue with three active jobs, restart recovery, pause/resume, cancel, retry, clear completed, history, and user ownership checks. Queue pause lets active jobs finish.
-- Isolated yt-dlp and FFmpeg services using subprocess argument arrays, permitted IDs, fixed formats/bitrates, timeouts, file limits, and no inherited yt-dlp configuration.
-- Live-editable download catalog: admins (by email, over the existing session) can add or remove authorized video IDs through `/admin/authorized-videos` without a server restart, in addition to the fixed `AUTHORIZED_VIDEO_IDS` seed list.
+- Isolated yt-dlp and FFmpeg services using subprocess argument arrays, validated IDs, fixed formats/bitrates, timeouts, file limits, and no inherited yt-dlp configuration.
 - MP3, M4A, and Opus; MP3 at 320 kbps by default. M4A can retain its source stream to avoid an unnecessary transcode, so requested bitrate is a preference rather than a promise of upsampling.
 - Title, artist, album/year where available, source tags, and best-effort cover embedding. Artwork failure preserves the successful audio result.
 - SQLite local storage and app-private audio files on native; localStorage metadata and IndexedDB audio on web. Completed server files are transferred to the device before becoming playable locally. Native tracks and playlists are also mirrored into relational `artists`/`albums`/`playlists`/`playlist_tracks` tables, used to recover the library if the primary state blob is ever missing or corrupted.
+- Per-track ⋮ menu everywhere a track appears (search, details, recently viewed, playlists, library, download history): Download, Download & Add to Playlist, Add to Playlist, Copy Link, Open on YouTube, View Details, Play Offline, Delete Download. Copy Link always copies the canonical `https://www.youtube.com/watch?v=<id>` URL and shows "Link copied to clipboard".
+- Download → MP3 → local library → playlist in one step. Playlists reference the single downloaded track (audio is never copied per playlist), and a track already on the device is reused, never downloaded again. The playlist add is applied when the download completes, even if the app was restarted in between.
+- Local playlists: create, rename, delete, add/remove/reorder tracks, play, shuffle, repeat, artwork from the first track, track count and total duration, and "Download missing tracks". A YouTube playlist can be saved with "Download playlist", which skips tracks you already have, keeps going past failures, shows `12 / 30 tracks downloaded`, and ends with a Downloaded / Already available / Failed summary.
+- Deleting a downloaded song that playlists use asks first and explains the offline impact; playlists keep the song's metadata so it can be downloaded again. Deleting a playlist never deletes audio.
+- Download manager shows the stage (Fetching → Downloading → Extracting audio → Converting to MP3 → Saving metadata → Completed), percent, speed and size from yt-dlp's live progress; cancel, retry, remove one item, clear completed. Failed or cancelled jobs delete their temporary files, and an output only becomes a track after FFmpeg has decoded it cleanly. Server errors are mapped to safe messages (private, removed, region-restricted, sign-in required, network, storage, FFmpeg).
+- Cover art is cached on the device (native) so library and playlist artwork render offline.
 - Persistent player, now-playing view, seek, volume, next/previous, shuffle/repeat, queue, likes, local playlists, artist/album browsing, light/dark appearance, and storage totals.
 - Original vector logo and rendered 1024px master, transparent variants, adaptive foreground, iOS icon, notification icon, favicon, and splash assets.
+
+## Download API
+
+All routes need a signed-in session. Video IDs are validated (`^[A-Za-z0-9_-]{11}$`); a supplied `url` is only checked against the ID (supported YouTube hosts only) and is never passed to yt-dlp, which always receives a URL the server builds from the ID. Files are named by job/video ID, never by title.
+
+| Route | Purpose |
+|---|---|
+| `POST /downloads` | `{ "video_id", "url"?, "playlist_id"?, "format", "quality" }` — queue a download (returns the existing local track instead if it is a duplicate). |
+| `GET /downloads/{id}` | Status: `{ id, status, progress, title, stage, speed, bytes_total, error, ... }`. Only the owner can read it. |
+| `GET /downloads` | The user's queue and pause state. |
+| `POST /downloads/{id}/{cancel,retry,remove}` | Per-job actions (`remove` only for finished jobs). |
+| `POST /downloads/queue/{pause,resume,retry,clear}` | Whole-queue actions. |
+
+Musika needs its own server for this: a React Native build cannot run the yt-dlp/FFmpeg binaries itself, so the app only ever calls this API and then stores the finished file on the device.
 
 ## Structure
 
 ```text
 App.tsx                       Screens and responsive navigation
-src/components/               Reusable UI, Google login, audio player
-src/services/                 Auth, API, local SQLite and audio storage
+src/components/               Reusable UI, ⋮ track actions, playlist views, Google login, audio player
+src/services/                 Auth, API, links (copy/open), local SQLite and audio storage
 src/store.ts                  Zustand persistence and queue synchronization
 src/models.ts                 Application models and local duplicate rules
 server/main.py                Authenticated HTTP endpoints
@@ -180,7 +198,7 @@ Regenerate branding with `node scripts/generate-assets.cjs` and audio with `pyth
 
 ## Device and deployment verification still needed
 
-Live OAuth and YouTube discovery require your own credentials. Native Google login, background playback, platform codec support (particularly Opus on iOS), and on-device file transfer must be tested on signed Android/iOS builds. Browser audio is stored offline, but the web shell is not a service-worker PWA; reopening the website still needs the server. Native builds include the application shell and support cold-start offline playback. A real YouTube extraction still needs an authorized test video; the automated media test converts original bundled audio through real FFmpeg in all three formats.
+Live OAuth and YouTube discovery require your own credentials. Native Google login, background playback, platform codec support (particularly Opus on iOS), and on-device file transfer must be tested on signed Android/iOS builds. Browser audio is stored offline, but the web shell is not a service-worker PWA; reopening the website still needs the server. Native builds include the application shell and support cold-start offline playback. A real YouTube extraction has not been exercised by the automated tests (yt-dlp needs internet access to YouTube); the automated media test converts original bundled audio through real FFmpeg in all three formats.
 
 Remote demo artwork is served by Unsplash and needs a connection; downloaded audio does not. Production artwork caching, storage quotas/retention, richer metadata correction, distributed workers, and app-store release signing remain deployment work.
 

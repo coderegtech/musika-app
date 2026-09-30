@@ -9,9 +9,11 @@ import {
   TextStyle,
   ImageStyle,
   ActivityIndicator,
+  Modal,
+  ScrollView,
 } from "react-native";
 import { Feather } from "@expo/vector-icons";
-import { Track, seconds } from "../models";
+import { Track, seconds, artwork, ACTIVE_STATES } from "../models";
 import { useStore } from "../store";
 export const light = {
   paper: "#F6F5EF",
@@ -235,6 +237,77 @@ export function Cover({
     />
   );
 }
+/** State-aware download control: Download, live progress, or Downloaded ✓. */
+export function DownloadButton({
+  track,
+  size = 34,
+}: {
+  track: Track;
+  size?: number;
+}) {
+  const c = useColors();
+  const downloaded = useStore((s) => s.library.some((t) => t.id === track.id));
+  const job = useStore((s) =>
+    s.downloads.find(
+      (j) => j.track.id === track.id && ACTIVE_STATES.includes(j.state),
+    ),
+  );
+  const label = downloaded
+    ? `Downloaded ✓ ${track.title}`
+    : job
+      ? `Downloading ${track.title}, ${Math.round(job.progress)}%`
+      : `Download ${track.title}`;
+  return (
+    <Pressable
+      accessibilityRole="button"
+      accessibilityLabel={label}
+      onPress={() => useStore.getState().quickDownload(track)}
+      style={({ pressed }: any) => ({
+        width: size,
+        height: size,
+        borderRadius: size / 2,
+        alignItems: "center",
+        justifyContent: "center",
+        backgroundColor: downloaded ? c.lime : "#1B302AAA",
+        opacity: pressed ? 0.6 : 1,
+      })}
+    >
+      {job ? (
+        <ActivityIndicator size="small" color="#fff" />
+      ) : (
+        <Icon
+          name={downloaded ? "check" : "download"}
+          size={size * 0.45}
+          color={downloaded ? "#243B30" : "#fff"}
+        />
+      )}
+    </Pressable>
+  );
+}
+export function MenuButton({
+  track,
+  color,
+  style,
+  onMenu,
+}: {
+  track: Track;
+  color?: string;
+  style?: ImageStyle;
+  onMenu?: (track: Track) => void;
+}) {
+  return (
+    <IconButton
+      name="more-vertical"
+      size={18}
+      color={color}
+      label={`More options for ${track.title}`}
+      onPress={() =>
+        onMenu ? onMenu(track) : useStore.getState().openActions(track)
+      }
+      style={style}
+    />
+  );
+}
 export function TrackCard({
   track,
   onPress,
@@ -254,25 +327,21 @@ export function TrackCard({
       style={({ hovered }: any) => ({ width, opacity: hovered ? 0.88 : 1 })}
     >
       <View style={{ position: "relative" }}>
-        <Cover
-          uri={track.thumbnail}
-          size={width}
-          style={{ borderRadius: 11 }}
-        />
-        {downloaded && (
-          <View
-            style={{
-              position: "absolute",
-              right: 10,
-              bottom: 10,
-              backgroundColor: c.lime,
-              borderRadius: 20,
-              padding: 6,
-            }}
-          >
-            <Icon name="check" size={13} color="#243B30" />
-          </View>
-        )}
+        <Cover uri={artwork(track)} size={width} style={{ borderRadius: 11 }} />
+        <View style={{ position: "absolute", right: 8, bottom: 8 }}>
+          <DownloadButton track={track} />
+        </View>
+        <View
+          style={{
+            position: "absolute",
+            right: 4,
+            top: 4,
+            backgroundColor: "#1B302A77",
+            borderRadius: 20,
+          }}
+        >
+          <MenuButton track={track} color="#fff" />
+        </View>
         <View
           style={{
             position: "absolute",
@@ -296,6 +365,7 @@ export function TrackCard({
         {track.title}
       </Label>
       <Label muted numberOfLines={1} style={{ fontSize: 12, marginTop: 5 }}>
+        {downloaded ? "Downloaded ✓ · " : ""}
         {track.artist}
       </Label>
     </Pressable>
@@ -307,12 +377,18 @@ export function TrackRow({
   index,
   action,
   subtitle,
+  menu = true,
+  onMenu,
 }: {
   track: Track;
   onPress: () => void;
   index?: number;
   action?: React.ReactNode;
   subtitle?: string;
+  /** Show the ⋮ options menu (Copy Link, Add to Playlist, ...). Off inside modals that cannot stack sheets. */
+  menu?: boolean;
+  /** Override what ⋮ does, e.g. to close a surrounding sheet before the menu opens. */
+  onMenu?: (track: Track) => void;
 }) {
   const c = useColors();
   return (
@@ -337,7 +413,7 @@ export function TrackRow({
         onPress={onPress}
         style={{ flex: 1, flexDirection: "row", alignItems: "center", gap: 14 }}
       >
-        <Cover uri={track.thumbnail} size={48} />
+        <Cover uri={artwork(track)} size={48} />
         <View style={{ flex: 1, gap: 5 }}>
           <Label numberOfLines={1} style={{ fontWeight: "600", fontSize: 13 }}>
             {track.title}
@@ -351,6 +427,7 @@ export function TrackRow({
         </Label>
       </Pressable>
       {action}
+      {menu && <MenuButton track={track} onMenu={onMenu} />}
     </View>
   );
 }
@@ -473,5 +550,73 @@ export function Loading() {
         </View>
       ))}
     </View>
+  );
+}
+export function Sheet({
+  visible,
+  onClose,
+  title,
+  children,
+}: {
+  visible: boolean;
+  onClose: () => void;
+  title: string;
+  children: React.ReactNode;
+}) {
+  const c = useColors();
+  return (
+    <Modal
+      visible={visible}
+      transparent
+      animationType="fade"
+      onRequestClose={onClose}
+    >
+      <View
+        style={{
+          flex: 1,
+          backgroundColor: "#0C1D17AA",
+          alignItems: "center",
+          justifyContent: "center",
+          padding: 18,
+        }}
+      >
+        <Pressable
+          accessibilityLabel="Close dialog"
+          onPress={onClose}
+          style={{ position: "absolute", top: 0, bottom: 0, left: 0, right: 0 }}
+        />
+        <View
+          style={{
+            maxWidth: 530,
+            width: "100%",
+            maxHeight: "94%",
+            backgroundColor: c.paper,
+            borderRadius: 23,
+            padding: 25,
+          }}
+        >
+          <View
+            style={{
+              flexDirection: "row",
+              alignItems: "center",
+              justifyContent: "space-between",
+              gap: 12,
+              marginBottom: 17,
+            }}
+          >
+            <Label style={{ fontSize: 12, fontWeight: "600", flex: 1 }}>
+              {title}
+            </Label>
+            <IconButton name="x" label="Close dialog" onPress={onClose} />
+          </View>
+          <ScrollView
+            showsVerticalScrollIndicator={false}
+            keyboardShouldPersistTaps="handled"
+          >
+            {children}
+          </ScrollView>
+        </View>
+      </View>
+    </Modal>
   );
 }

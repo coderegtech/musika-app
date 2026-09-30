@@ -13,6 +13,11 @@ export async function request<T>(
       ...authHeaders(),
       ...init.headers,
     },
+  }).catch((e) => {
+    if (e?.name === "AbortError") throw e;
+    throw new Error(
+      "Can't reach the Musika server. Your downloaded music and playlists still work offline.",
+    );
   });
   if (r.status === 401) {
     await clearSession();

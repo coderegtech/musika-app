@@ -8,7 +8,6 @@ import {
   Pressable,
   Image,
   ImageBackground,
-  Modal,
   useWindowDimensions,
   Platform,
   ActivityIndicator,
@@ -32,7 +31,14 @@ import {
   Section,
   Empty,
   Loading,
+  Sheet,
 } from "./src/components/ui";
+import TrackActions from "./src/components/TrackActions";
+import {
+  LocalPlaylistSheet,
+  BatchProgress,
+} from "./src/components/PlaylistViews";
+import { copyLink, openOnYouTube } from "./src/services/links";
 import Player from "./src/components/Player";
 import GoogleButton from "./src/components/GoogleButton";
 import { useStore, tickQueue } from "./src/store";
@@ -40,7 +46,10 @@ import {
   DEMO,
   Track,
   Playlist,
+  canonicalUrl,
   duplicate,
+  isLocalPlaylist,
+  jobStatus,
   parseVideoUrl,
   seconds,
 } from "./src/models";
@@ -118,9 +127,9 @@ function AppContent() {
     [playlistPage, setPlaylistPage] = useState<string | undefined>(),
     [selected, setSelected] = useState<string[]>([]),
     [playlistLoading, setPlaylistLoading] = useState(false),
-    [playlistError, setPlaylistError] = useState("");
-  const [permission, setPermission] = useState(DEMO),
-    [busy, setBusy] = useState(false),
+    [playlistError, setPlaylistError] = useState(""),
+    [localPlaylistId, setLocalPlaylistId] = useState<string | null>(null);
+  const [busy, setBusy] = useState(false),
     [allowDuplicate, setAllowDuplicate] = useState(false);
   const [paste, setPaste] = useState(false),
     [url, setUrl] = useState(""),
@@ -251,26 +260,24 @@ function AppContent() {
     }
   }
   function openDetails(track: Track) {
+    s.viewed(track);
     setDetails(track);
-    setPermission(DEMO);
     setAllowDuplicate(false);
   }
   async function openPlaylist(p: Playlist, page?: string) {
+    if (isLocalPlaylist(p)) {
+      setLocalPlaylistId(p.id);
+      return;
+    }
     if (!page) {
       setPlaylist(p);
       setPlaylistTracks([]);
       setSelected([]);
-      setPermission(DEMO);
     }
     setPlaylistError("");
     setPlaylistLoading(true);
     try {
-      const r = p.id.startsWith("local-")
-        ? {
-            items: s.library.filter((t) => p.trackIds?.includes(t.id)),
-            nextPageToken: undefined,
-          }
-        : await getPlaylistItems(p, page);
+      const r = await getPlaylistItems(p, page);
       setPlaylistTracks((old) =>
         page
           ? [...old, ...r.items.filter((t) => !old.some((x) => x.id === t.id))]
@@ -387,39 +394,6 @@ function AppContent() {
           </View>
         </LinearGradient>
       </ImageBackground>
-    </Pressable>
-  );
-  const downloadPermission = (
-    <Pressable
-      accessibilityRole="checkbox"
-      accessibilityState={{ checked: permission }}
-      onPress={() => setPermission(!permission)}
-      style={{
-        flexDirection: "row",
-        alignItems: "center",
-        gap: 12,
-        paddingVertical: 14,
-      }}
-    >
-      <View
-        style={{
-          width: 21,
-          height: 21,
-          borderRadius: 5,
-          borderWidth: 1,
-          borderColor: c.muted,
-          backgroundColor: permission ? c.lime : c.surface,
-          alignItems: "center",
-          justifyContent: "center",
-        }}
-      >
-        {permission && <Icon name="check" size={14} color="#263E32" />}
-      </View>
-      <Label muted style={{ fontSize: 12, flex: 1, lineHeight: 19 }}>
-        {DEMO
-          ? "This original demo audio is available to save."
-          : "I own this content or have permission to download it."}
-      </Label>
     </Pressable>
   );
   if (!hydrated || !authChecked)
@@ -1100,7 +1074,7 @@ function AppContent() {
                   <Label muted style={{ fontSize: 10 }}>
                     {DEMO
                       ? "A taste of Musika · Fictional artists, original demo audio."
-                      : "Discovery powered by YouTube · Your downloads, your permission."}
+                      : "Discovery powered by YouTube · Convert songs to MP3 and keep them on your device."}
                   </Label>
                 </View>
               </>
@@ -1303,6 +1277,18 @@ function AppContent() {
                         </Pressable>
                       ))}
                     </View>
+                    {kind === "tracks" && s.recent.length > 0 && (
+                      <View style={{ marginTop: 32 }}>
+                        <Section title="Recently viewed" />
+                        {s.recent.slice(0, 5).map((t) => (
+                          <TrackRow
+                            key={t.id}
+                            track={t}
+                            onPress={() => openDetails(t)}
+                          />
+                        ))}
+                      </View>
+                    )}
                     {kind === "tracks" && (
                       <View style={{ marginTop: 32 }}>
                         <Section title="Worth a listen" />
@@ -1428,25 +1414,46 @@ function AppContent() {
                     >
                       <TrackRow
                         track={job.track}
-                        subtitle={`${job.track.artist} · ${job.state.toLowerCase()}`}
+                        subtitle={`${job.track.artist} · ${jobStatus(job)}`}
                         onPress={() => openDetails(job.track)}
                         action={
                           ["FAILED", "CANCELLED"].includes(job.state) ? (
-                            <IconButton
-                              name="rotate-cw"
-                              label={`Retry ${job.track.title}`}
-                              onPress={() =>
-                                void run(() => s.queueAction("retry", job.id))
-                              }
-                            />
-                          ) : job.state === "COMPLETED" ? (
-                            <IconButton
-                              name="play"
-                              label={`Play ${job.track.title}`}
-                              onPress={() => s.play(job.track)}
-                            />
-                          ) : ["SKIPPED"].includes(job.state) ? (
-                            <Icon name="check" />
+                            <>
+                              <IconButton
+                                name="rotate-cw"
+                                label={`Retry ${job.track.title}`}
+                                onPress={() =>
+                                  void run(() => s.queueAction("retry", job.id))
+                                }
+                              />
+                              <IconButton
+                                name="trash-2"
+                                label={`Remove ${job.track.title} from the list`}
+                                onPress={() =>
+                                  void run(() =>
+                                    s.queueAction("remove", job.id),
+                                  )
+                                }
+                              />
+                            </>
+                          ) : job.state === "COMPLETED" ||
+                            job.state === "SKIPPED" ? (
+                            <>
+                              <IconButton
+                                name="play"
+                                label={`Play ${job.track.title}`}
+                                onPress={() => s.play(job.track)}
+                              />
+                              <IconButton
+                                name="x"
+                                label={`Remove ${job.track.title} from the list`}
+                                onPress={() =>
+                                  void run(() =>
+                                    s.queueAction("remove", job.id),
+                                  )
+                                }
+                              />
+                            </>
                           ) : (
                             <IconButton
                               name="x"
@@ -1966,6 +1973,19 @@ function AppContent() {
           </View>
         </View>
       )}
+      <TrackActions
+        onViewDetails={openDetails}
+        onViewLibrary={() => {
+          s.setTab("Library");
+          setLibraryFilter("All tracks");
+          setLibraryQuery("");
+        }}
+      />
+      <LocalPlaylistSheet
+        playlistId={localPlaylistId}
+        onClose={() => setLocalPlaylistId(null)}
+        onViewDetails={openDetails}
+      />
       <Sheet
         visible={!!details}
         onClose={() => setDetails(null)}
@@ -2012,6 +2032,60 @@ function AppContent() {
               {details.original_description.slice(0, 360) ||
                 "A new discovery, ready for your library."}
             </Label>
+            <View
+              style={{
+                flexDirection: "row",
+                flexWrap: "wrap",
+                gap: 8,
+                marginTop: 16,
+              }}
+            >
+              {canonicalUrl(details) && (
+                <>
+                  <Button
+                    small
+                    secondary
+                    icon="link"
+                    title="Copy link"
+                    onPress={() =>
+                      void run(async () => {
+                        await copyLink(details);
+                        s.notify("Link copied to clipboard");
+                      })
+                    }
+                  />
+                  <Button
+                    small
+                    secondary
+                    icon="external-link"
+                    title="Open on YouTube"
+                    onPress={() => void run(() => openOnYouTube(details))}
+                  />
+                </>
+              )}
+              <Button
+                small
+                secondary
+                icon="list"
+                title="Add to playlist"
+                onPress={() => {
+                  setDetails(null);
+                  s.openActions(details, "addToPlaylist");
+                }}
+              />
+              {duplicate(details, s.library) === "NEW" && (
+                <Button
+                  small
+                  secondary
+                  icon="folder-plus"
+                  title="Download & add to playlist"
+                  onPress={() => {
+                    setDetails(null);
+                    s.openActions(details, "downloadToPlaylist");
+                  }}
+                />
+              )}
+            </View>
             <View
               style={{
                 paddingVertical: 15,
@@ -2074,7 +2148,6 @@ function AppContent() {
               </>
             ) : (
               <>
-                {downloadPermission}
                 {duplicate(details, s.library) === "POSSIBLE DUPLICATE" && (
                   <Pressable
                     accessibilityRole="checkbox"
@@ -2095,7 +2168,6 @@ function AppContent() {
                   icon="download"
                   disabled={
                     busy ||
-                    !permission ||
                     (duplicate(details, s.library) === "POSSIBLE DUPLICATE" &&
                       !allowDuplicate)
                   }
@@ -2103,7 +2175,7 @@ function AppContent() {
                     void run(async () => {
                       setBusy(true);
                       try {
-                        await s.enqueue([details], permission, allowDuplicate);
+                        await s.enqueue([details], allowDuplicate);
                         setDetails(null);
                       } finally {
                         setBusy(false);
@@ -2191,6 +2263,10 @@ function AppContent() {
                   setPlaylist(null);
                   openDetails(t);
                 }}
+                onMenu={(track) => {
+                  setPlaylist(null);
+                  s.openActions(track);
+                }}
                 action={
                   duplicate(t, s.library) === "NEW" ? (
                     <IconButton
@@ -2228,18 +2304,44 @@ function AppContent() {
                 style={{ marginTop: 15 }}
               />
             )}
-            {downloadPermission}
+            <BatchProgress />
             <Button
-              title={`Download ${selected.length} ${selected.length === 1 ? "track" : "tracks"}`}
+              icon="download-cloud"
+              title={`Download playlist · ${playlistTracks.length} ${playlistTracks.length === 1 ? "track" : "tracks"}`}
+              disabled={!playlistTracks.length || busy}
+              onPress={() =>
+                void run(async () => {
+                  setBusy(true);
+                  try {
+                    // Songs are downloaded once and referenced by the new playlist; existing ones are skipped.
+                    const id = s.addPlaylist(
+                      playlist.title,
+                      [],
+                      playlist.thumbnail,
+                    );
+                    s.addToPlaylist(id, playlistTracks);
+                    await s.downloadTracks(playlistTracks, {
+                      playlistId: id,
+                      label: "Playlist download",
+                    });
+                  } finally {
+                    setBusy(false);
+                  }
+                })
+              }
+              style={{ marginBottom: 10 }}
+            />
+            <Button
+              secondary
+              title={`Download ${selected.length} selected ${selected.length === 1 ? "track" : "tracks"}`}
               icon="download"
-              disabled={!selected.length || !permission || busy}
+              disabled={!selected.length || busy}
               onPress={() =>
                 void run(async () => {
                   setBusy(true);
                   try {
                     await s.enqueue(
                       playlistTracks.filter((t) => selected.includes(t.id)),
-                      permission,
                     );
                     setPlaylist(null);
                   } finally {
@@ -2248,20 +2350,6 @@ function AppContent() {
                 })
               }
             />
-            {playlist.id.startsWith("local-") && (
-              <Pressable
-                accessibilityRole="button"
-                onPress={() => {
-                  s.removePlaylist(playlist.id);
-                  setPlaylist(null);
-                }}
-                style={{ padding: 16, alignItems: "center" }}
-              >
-                <Label muted style={{ fontSize: 11 }}>
-                  Delete this playlist
-                </Label>
-              </Pressable>
-            )}
           </>
         )}
       </Sheet>
@@ -2456,74 +2544,6 @@ function Setting({
       </View>
       {children}
     </View>
-  );
-}
-function Sheet({
-  visible,
-  onClose,
-  title,
-  children,
-}: {
-  visible: boolean;
-  onClose: () => void;
-  title: string;
-  children: React.ReactNode;
-}) {
-  const c = useColors();
-  return (
-    <Modal
-      visible={visible}
-      transparent
-      animationType="fade"
-      onRequestClose={onClose}
-    >
-      <View
-        style={{
-          flex: 1,
-          backgroundColor: "#0C1D17AA",
-          alignItems: "center",
-          justifyContent: "center",
-          padding: 18,
-        }}
-      >
-        <Pressable
-          accessibilityLabel="Close dialog"
-          onPress={onClose}
-          style={{ position: "absolute", top: 0, bottom: 0, left: 0, right: 0 }}
-        />
-        <View
-          style={{
-            maxWidth: 530,
-            width: "100%",
-            maxHeight: "94%",
-            backgroundColor: c.paper,
-            borderRadius: 23,
-            padding: 25,
-          }}
-        >
-          <View
-            style={{
-              flexDirection: "row",
-              alignItems: "center",
-              justifyContent: "space-between",
-              gap: 12,
-              marginBottom: 17,
-            }}
-          >
-            <Label style={{ fontSize: 12, fontWeight: "600", flex: 1 }}>
-              {title}
-            </Label>
-            <IconButton name="x" label="Close dialog" onPress={onClose} />
-          </View>
-          <ScrollView
-            showsVerticalScrollIndicator={false}
-            keyboardShouldPersistTaps="handled"
-          >
-            {children}
-          </ScrollView>
-        </View>
-      </View>
-    </Modal>
   );
 }
 export default function App() {
