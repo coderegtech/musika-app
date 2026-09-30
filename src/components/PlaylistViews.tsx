@@ -1,7 +1,7 @@
 import React, { useEffect, useRef, useState } from "react";
 import { View, TextInput } from "react-native";
 import { useStore, resolveTracks } from "../store";
-import { DEMO, Track, artwork, totalDuration } from "../models";
+import { Track, artwork, totalDuration } from "../models";
 import {
   Sheet,
   Label,
@@ -12,7 +12,6 @@ import {
   TrackRow,
   useColors,
 } from "./ui";
-import { PermissionCheck } from "./TrackActions";
 
 /** Overall progress for a multi-track download, then a summary once every track has settled. */
 export function BatchProgress() {
@@ -123,11 +122,9 @@ export function LocalPlaylistSheet({
   const [editing, setEditing] = useState(false);
   const [renaming, setRenaming] = useState(false);
   const [draft, setDraft] = useState("");
-  const [permission, setPermission] = useState(DEMO);
   useEffect(() => {
     setEditing(false);
     setRenaming(false);
-    setPermission(DEMO);
   }, [playlistId]);
   const tracks = resolveTracks(s, playlist?.trackIds);
   const has = (t: Track) => s.library.some((x) => x.id === t.id);
@@ -240,19 +237,12 @@ export function LocalPlaylistSheet({
           </View>
           {missing.length > 0 && (
             <>
-              {!DEMO && (
-                <PermissionCheck
-                  checked={permission}
-                  onChange={setPermission}
-                />
-              )}
               <Button
                 icon="download"
                 title={`Download ${missing.length} missing ${missing.length === 1 ? "track" : "tracks"}`}
-                disabled={!permission}
                 onPress={() =>
                   void s
-                    .downloadTracks(missing, permission, {
+                    .downloadTracks(missing, {
                       label: "Playlist download",
                     })
                     .catch((e) => s.notify(e.message))

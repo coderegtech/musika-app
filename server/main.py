@@ -60,15 +60,6 @@ def session(request:Request):
     if not row: raise HTTPException(401,'Your session expired. Sign in again.')
     return row['user_id']
 
-def admin(user=Depends(session)):
-    admins = {e.strip().lower() for e in os.getenv('ADMIN_EMAILS','').split(',') if e.strip()}
-    with db.connect() as conn: profile = json.loads(conn.execute('SELECT profile FROM users WHERE id=?',(user,)).fetchone()['profile'])
-    if profile.get('email','').lower() not in admins: raise HTTPException(403,'This account cannot manage the download catalog.')
-    return user
-
-def authorized(video_id):
-    return video_id in os.getenv('AUTHORIZED_VIDEO_IDS','').split(',') or db.is_authorized(video_id)
-
 class GoogleLogin(BaseModel):
     idToken: str = Field(max_length=10000)
 
@@ -133,15 +124,12 @@ class DownloadRequest(BaseModel):
     playlist_id:str|None = Field(default=None,pattern=r'^[\w-]{1,64}$')
     format:Literal['mp3','m4a','opus']='mp3'
     quality:Literal[128,192,256,320]=320
-    permission_confirmed:bool=False
     allow_duplicate:bool=False
 
 @app.post('/downloads')
 async def download(body:DownloadRequest,user=Depends(session)):
     if body.url is not None and parse_video_url(body.url) != body.video_id:
         raise HTTPException(400,'Only YouTube links that match the requested video are supported.')
-    if not body.permission_confirmed or not authorized(body.video_id):
-        raise HTTPException(403,'Only content you have permission to download and that is approved by the server can be saved.')
     track = await youtube.getMusicMetadata(body.video_id)
     if track['classification']=='NOT_MUSIC': raise HTTPException(400,'This video is not classified as music.')
     duplicate = DuplicateDetectionService.check(track,db.tracks(user))
@@ -188,23 +176,6 @@ async def job_action(job_id:str,action:str,user=Depends(session)):
         except sqlite3.IntegrityError: raise HTTPException(409,'This track is already queued.')
     elif action=='remove' and job['state'] in ('COMPLETED','SKIPPED','FAILED','CANCELLED'): db.delete_job(user,job_id)
     else: raise HTTPException(400,'This action is not available for this download.')
-    return {'ok':True}
-
-class AuthorizeVideo(BaseModel):
-    video_id:str = Field(pattern=r'^[A-Za-z0-9_-]{11}$')
-
-@app.get('/admin/authorized-videos')
-def list_authorized(user=Depends(admin)): return {'items':db.authorized_videos()}
-
-@app.post('/admin/authorized-videos')
-def add_authorized(body:AuthorizeVideo,user=Depends(admin)):
-    db.add_authorized(body.video_id,user)
-    return {'ok':True}
-
-@app.delete('/admin/authorized-videos/{video_id}')
-def remove_authorized(video_id:str,user=Depends(admin)):
-    if not VIDEO_ID.fullmatch(video_id): raise HTTPException(400,'Invalid YouTube video ID.')
-    db.remove_authorized(video_id)
     return {'ok':True}
 
 @app.get('/library')

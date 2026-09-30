@@ -25,31 +25,22 @@ class QueueTests(unittest.IsolatedAsyncioTestCase):
             try: await asyncio.sleep(10)
             finally: count-=1
         self.queue.engine.download=download
-        with patch.dict(os.environ,{'AUTHORIZED_VIDEO_IDS':','.join(f'{i:011d}' for i in range(6))}):
-            worker=asyncio.create_task(self.queue.start());await asyncio.sleep(.15)
-            self.assertEqual(peak,3);self.assertEqual(len(self.queue.active),3)
-            with self.db.connect() as db: db.execute("INSERT INTO settings VALUES('alice','paused','true')")
-            tasks=list(self.queue.active.values())
-            for task in tasks:task.cancel()
-            await asyncio.gather(*tasks,return_exceptions=True);await asyncio.sleep(.55)
-            self.assertEqual(len(self.queue.active),0);self.assertEqual(sum(j['state']=='QUEUED' for j in self.db.jobs('alice')),3)
-            worker.cancel();await asyncio.gather(worker,return_exceptions=True)
-    async def test_unauthorized_content_never_reaches_engine(self):
-        called=False
-        async def forbidden(*args):
-            nonlocal called;called=True
-        self.queue.engine.download=forbidden
-        j=job(1);self.db.save_job(j)
-        with patch.dict(os.environ,{'AUTHORIZED_VIDEO_IDS':''}):await self.queue.execute(j)
-        self.assertFalse(called);self.assertEqual(self.db.jobs('alice')[0]['state'],'FAILED')
-    async def test_admin_authorized_video_reaches_engine(self):
+        worker=asyncio.create_task(self.queue.start());await asyncio.sleep(.15)
+        self.assertEqual(peak,3);self.assertEqual(len(self.queue.active),3)
+        with self.db.connect() as db: db.execute("INSERT INTO settings VALUES('alice','paused','true')")
+        tasks=list(self.queue.active.values())
+        for task in tasks:task.cancel()
+        await asyncio.gather(*tasks,return_exceptions=True);await asyncio.sleep(.55)
+        self.assertEqual(len(self.queue.active),0);self.assertEqual(sum(j['state']=='QUEUED' for j in self.db.jobs('alice')),3)
+        worker.cancel();await asyncio.gather(worker,return_exceptions=True)
+    async def test_download_reaches_engine_without_any_approval(self):
         called=False
         async def allowed(job,transition,run):
             nonlocal called;called=True
             return {**job['track'],'file_hash':'x','file_path':str(Path(self.temp.name)/'x'),'format':'mp3','bytes':1}
         self.queue.engine.download=allowed
-        j=job(1);self.db.save_job(j);self.db.add_authorized(j['track']['id'],'alice')
-        with patch.dict(os.environ,{'AUTHORIZED_VIDEO_IDS':''}):await self.queue.execute(j)
+        j=job(1);self.db.save_job(j)
+        await self.queue.execute(j)
         self.assertTrue(called);self.assertEqual(self.db.jobs('alice')[0]['state'],'COMPLETED')
     async def test_exact_duplicate_skipped(self):
         j=job(2);self.db.save_track('alice',j['track']);self.db.save_job(j);await self.queue.execute(j)
@@ -73,7 +64,7 @@ class QueueTests(unittest.IsolatedAsyncioTestCase):
         async def extract(video_id,directory,run,progress=None):
             (directory/'source.webm.part').write_bytes(b'partial');raise RuntimeError('This video is private and cannot be downloaded.')
         self.queue.engine.extractor.extract=extract
-        j=job(5);self.db.save_job(j);self.db.add_authorized(j['track']['id'],'alice')
+        j=job(5);self.db.save_job(j);
         await self.queue.execute(j)
         saved=self.db.jobs('alice')[0]
         self.assertEqual(saved['state'],'FAILED');self.assertIn('private',saved['error']);self.assertEqual(self.db.tracks('alice'),[])
@@ -83,7 +74,7 @@ class QueueTests(unittest.IsolatedAsyncioTestCase):
         async def extract(video_id,directory,run,progress=None):
             (directory/'source.webm.part').write_bytes(b'partial');await asyncio.sleep(10)
         self.queue.engine.extractor.extract=extract
-        j=job(6);self.db.save_job(j);self.db.add_authorized(j['track']['id'],'alice')
+        j=job(6);self.db.save_job(j);
         task=asyncio.create_task(self.queue.execute(j));await asyncio.sleep(.1);task.cancel()
         await asyncio.gather(task,return_exceptions=True)
         self.assertEqual(self.db.jobs('alice')[0]['state'],'CANCELLED');self.assertFalse((root/j['id']).exists())
@@ -93,7 +84,7 @@ class QueueTests(unittest.IsolatedAsyncioTestCase):
         async def process(source,output,track,quality,run):output.write_bytes(b'not audio')
         async def artwork(*args):return None
         self.queue.engine.extractor.extract=extract;self.queue.engine.ffmpeg.process=process;self.queue.engine.ffmpeg.artwork=artwork
-        j=job(7);self.db.save_job(j);self.db.add_authorized(j['track']['id'],'alice')
+        j=job(7);self.db.save_job(j);
         await self.queue.execute(j)
         self.assertEqual(self.db.jobs('alice')[0]['state'],'FAILED');self.assertEqual(self.db.tracks('alice'),[])
         self.assertFalse((Path(self.temp.name)/'audio'/j['id']).exists())
@@ -104,7 +95,7 @@ class QueueTests(unittest.IsolatedAsyncioTestCase):
             seen.append(dict(self.db.jobs('alice')[0]))
             path=directory/'source.webm';path.write_bytes(b'x');return path
         self.queue.engine.extractor.extract=extract
-        j=job(8);self.db.save_job(j);self.db.add_authorized(j['track']['id'],'alice')
+        j=job(8);self.db.save_job(j);
         await self.queue.execute(j)
         self.assertEqual(seen[0]['stage'],'Downloading');self.assertEqual(seen[0]['speed'],2048.5);self.assertEqual(seen[0]['bytes_total'],1000.0);self.assertEqual(seen[0]['progress'],40)
 

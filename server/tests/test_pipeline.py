@@ -38,14 +38,14 @@ class PipelineTests(unittest.IsolatedAsyncioTestCase):
         return str(path)
     def job(self, video_id='abcdefghijk'):
         job = {'id':'job-1','user_id':'alice','track':{'id':video_id,'source':'youtube','title':'Pipeline Song','artist':'Tester','duration':24,'thumbnail':'','source_url':'https://www.youtube.com/watch?v='+video_id},'state':'QUEUED','progress':0,'format':'mp3','quality':192,'playlist_id':'local-1'}
-        self.db.save_job(job); self.db.add_authorized(video_id,'alice')
+        self.db.save_job(job)
         return job
     async def test_full_pipeline_streams_progress_and_produces_a_verified_mp3(self):
         job = self.job()
         seen = []
         original = self.db.save_job
         self.db.save_job = lambda j: (seen.append((j['state'],j.get('stage'),j.get('speed'))), original(j))[1]
-        with patch.dict(os.environ,{'YT_DLP_PATH':self.fake(),'AUTHORIZED_VIDEO_IDS':''}):
+        with patch.dict(os.environ,{'YT_DLP_PATH':self.fake()}):
             await self.queue.execute(job)
         saved = self.db.jobs('alice')[0]
         self.assertEqual(saved['state'],'COMPLETED',saved.get('error'))
@@ -61,7 +61,7 @@ class PipelineTests(unittest.IsolatedAsyncioTestCase):
         self.assertEqual(saved['playlist_id'],'local-1')
     async def test_private_video_fails_cleanly_with_no_partial_files_or_track(self):
         job = self.job()
-        with patch.dict(os.environ,{'YT_DLP_PATH':self.fake(fail=True),'AUTHORIZED_VIDEO_IDS':''}):
+        with patch.dict(os.environ,{'YT_DLP_PATH':self.fake(fail=True)}):
             await self.queue.execute(job)
         saved = self.db.jobs('alice')[0]
         self.assertEqual(saved['state'],'FAILED'); self.assertIn('private',saved['error'].lower())

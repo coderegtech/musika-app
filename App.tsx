@@ -129,8 +129,7 @@ function AppContent() {
     [playlistLoading, setPlaylistLoading] = useState(false),
     [playlistError, setPlaylistError] = useState(""),
     [localPlaylistId, setLocalPlaylistId] = useState<string | null>(null);
-  const [permission, setPermission] = useState(DEMO),
-    [busy, setBusy] = useState(false),
+  const [busy, setBusy] = useState(false),
     [allowDuplicate, setAllowDuplicate] = useState(false);
   const [paste, setPaste] = useState(false),
     [url, setUrl] = useState(""),
@@ -263,7 +262,6 @@ function AppContent() {
   function openDetails(track: Track) {
     s.viewed(track);
     setDetails(track);
-    setPermission(DEMO);
     setAllowDuplicate(false);
   }
   async function openPlaylist(p: Playlist, page?: string) {
@@ -275,7 +273,6 @@ function AppContent() {
       setPlaylist(p);
       setPlaylistTracks([]);
       setSelected([]);
-      setPermission(DEMO);
     }
     setPlaylistError("");
     setPlaylistLoading(true);
@@ -397,39 +394,6 @@ function AppContent() {
           </View>
         </LinearGradient>
       </ImageBackground>
-    </Pressable>
-  );
-  const downloadPermission = (
-    <Pressable
-      accessibilityRole="checkbox"
-      accessibilityState={{ checked: permission }}
-      onPress={() => setPermission(!permission)}
-      style={{
-        flexDirection: "row",
-        alignItems: "center",
-        gap: 12,
-        paddingVertical: 14,
-      }}
-    >
-      <View
-        style={{
-          width: 21,
-          height: 21,
-          borderRadius: 5,
-          borderWidth: 1,
-          borderColor: c.muted,
-          backgroundColor: permission ? c.lime : c.surface,
-          alignItems: "center",
-          justifyContent: "center",
-        }}
-      >
-        {permission && <Icon name="check" size={14} color="#263E32" />}
-      </View>
-      <Label muted style={{ fontSize: 12, flex: 1, lineHeight: 19 }}>
-        {DEMO
-          ? "This original demo audio is available to save."
-          : "I own this content or have permission to download it."}
-      </Label>
     </Pressable>
   );
   if (!hydrated || !authChecked)
@@ -1110,7 +1074,7 @@ function AppContent() {
                   <Label muted style={{ fontSize: 10 }}>
                     {DEMO
                       ? "A taste of Musika · Fictional artists, original demo audio."
-                      : "Discovery powered by YouTube · Your downloads, your permission."}
+                      : "Discovery powered by YouTube · Convert songs to MP3 and keep them on your device."}
                   </Label>
                 </View>
               </>
@@ -2184,7 +2148,6 @@ function AppContent() {
               </>
             ) : (
               <>
-                {downloadPermission}
                 {duplicate(details, s.library) === "POSSIBLE DUPLICATE" && (
                   <Pressable
                     accessibilityRole="checkbox"
@@ -2205,7 +2168,6 @@ function AppContent() {
                   icon="download"
                   disabled={
                     busy ||
-                    !permission ||
                     (duplicate(details, s.library) === "POSSIBLE DUPLICATE" &&
                       !allowDuplicate)
                   }
@@ -2213,7 +2175,7 @@ function AppContent() {
                     void run(async () => {
                       setBusy(true);
                       try {
-                        await s.enqueue([details], permission, allowDuplicate);
+                        await s.enqueue([details], allowDuplicate);
                         setDetails(null);
                       } finally {
                         setBusy(false);
@@ -2343,11 +2305,10 @@ function AppContent() {
               />
             )}
             <BatchProgress />
-            {downloadPermission}
             <Button
               icon="download-cloud"
               title={`Download playlist · ${playlistTracks.length} ${playlistTracks.length === 1 ? "track" : "tracks"}`}
-              disabled={!playlistTracks.length || !permission || busy}
+              disabled={!playlistTracks.length || busy}
               onPress={() =>
                 void run(async () => {
                   setBusy(true);
@@ -2359,7 +2320,7 @@ function AppContent() {
                       playlist.thumbnail,
                     );
                     s.addToPlaylist(id, playlistTracks);
-                    await s.downloadTracks(playlistTracks, permission, {
+                    await s.downloadTracks(playlistTracks, {
                       playlistId: id,
                       label: "Playlist download",
                     });
@@ -2374,14 +2335,13 @@ function AppContent() {
               secondary
               title={`Download ${selected.length} selected ${selected.length === 1 ? "track" : "tracks"}`}
               icon="download"
-              disabled={!selected.length || !permission || busy}
+              disabled={!selected.length || busy}
               onPress={() =>
                 void run(async () => {
                   setBusy(true);
                   try {
                     await s.enqueue(
                       playlistTracks.filter((t) => selected.includes(t.id)),
-                      permission,
                     );
                     setPlaylist(null);
                   } finally {

@@ -2,7 +2,6 @@ import React, { useEffect, useMemo, useState } from "react";
 import { View, Pressable, TextInput } from "react-native";
 import { useStore, playlistsContaining } from "../store";
 import {
-  DEMO,
   Track,
   artwork,
   canonicalUrl,
@@ -12,48 +11,6 @@ import {
 } from "../models";
 import { copyLink, openOnYouTube } from "../services/links";
 import { Sheet, Label, Icon, Button, Cover, useColors } from "./ui";
-
-export function PermissionCheck({
-  checked,
-  onChange,
-}: {
-  checked: boolean;
-  onChange: (value: boolean) => void;
-}) {
-  const c = useColors();
-  return (
-    <Pressable
-      accessibilityRole="checkbox"
-      accessibilityState={{ checked }}
-      onPress={() => onChange(!checked)}
-      style={{
-        flexDirection: "row",
-        alignItems: "center",
-        gap: 12,
-        paddingVertical: 14,
-      }}
-    >
-      <View
-        style={{
-          width: 21,
-          height: 21,
-          borderRadius: 5,
-          borderWidth: 1,
-          borderColor: c.muted,
-          backgroundColor: checked ? c.lime : c.surface,
-          alignItems: "center",
-          justifyContent: "center",
-        }}
-      >
-        {checked && <Icon name="check" size={14} color="#263E32" />}
-      </View>
-      <Label muted style={{ fontSize: 12, flex: 1, lineHeight: 19 }}>
-        I have permission to download and store this music, and the server has
-        approved it.
-      </Label>
-    </Pressable>
-  );
-}
 
 function ActionRow({
   icon,
@@ -190,13 +147,11 @@ export default function TrackActions({
   const c = useColors();
   const actions = useStore((s) => s.actions);
   const s = useStore();
-  const [permission, setPermission] = useState(DEMO);
   const [selected, setSelected] = useState<string | null>(null);
   const [creating, setCreating] = useState(false);
   const [name, setName] = useState("");
   const [busy, setBusy] = useState(false);
   useEffect(() => {
-    setPermission(DEMO);
     setSelected(null);
     setCreating(false);
     setName("");
@@ -220,9 +175,9 @@ export default function TrackActions({
       s.closeActions();
       s.notify("Possible duplicate. Review this track before downloading.");
       onViewDetails(track);
-    } else if (next === "download" && DEMO) {
+    } else if (next === "download") {
       s.closeActions();
-      void guarded(() => s.enqueue([track], true));
+      void guarded(() => s.enqueue([track]));
     } else s.openActions(track, next);
   };
   const playlistTarget = async () => {
@@ -253,14 +208,13 @@ export default function TrackActions({
         const id = await playlistTarget();
         if (!id) return;
         s.closeActions();
-        await s.enqueue([track], permission, false, id);
+        await s.enqueue([track], false, id);
       } finally {
         setBusy(false);
       }
     });
   const title = {
     menu: "Options",
-    download: "Download",
     downloadToPlaylist: "Download & Add to Playlist",
     addToPlaylist: "Add to Playlist",
     delete: "Delete download",
@@ -384,43 +338,6 @@ export default function TrackActions({
               )}
             </>
           )}
-          {mode === "download" && (
-            <>
-              {!DEMO && (
-                <PermissionCheck
-                  checked={permission}
-                  onChange={setPermission}
-                />
-              )}
-              <Button
-                title={
-                  busy
-                    ? "Adding to your queue…"
-                    : `Download ${s.format.toUpperCase()}`
-                }
-                icon="download"
-                disabled={busy || !permission}
-                onPress={() =>
-                  void guarded(async () => {
-                    setBusy(true);
-                    try {
-                      s.closeActions();
-                      await s.enqueue([track], permission);
-                    } finally {
-                      setBusy(false);
-                    }
-                  })
-                }
-              />
-              <Label
-                muted
-                style={{ textAlign: "center", fontSize: 10, marginTop: 13 }}
-              >
-                {s.format.toUpperCase()} · {s.quality} kbps · Saved for offline
-                listening
-              </Label>
-            </>
-          )}
           {mode === "downloadToPlaylist" && (
             <>
               <PlaylistPicker
@@ -431,16 +348,10 @@ export default function TrackActions({
                 name={name}
                 onName={setName}
               />
-              {!DEMO && (
-                <PermissionCheck
-                  checked={permission}
-                  onChange={setPermission}
-                />
-              )}
               <Button
                 title={busy ? "Adding to your queue…" : "Download & add"}
                 icon="download"
-                disabled={busy || !permission || !ready}
+                disabled={busy || !ready}
                 onPress={() => void downloadAndAdd()}
                 style={{ marginTop: 14 }}
               />

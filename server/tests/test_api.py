@@ -25,44 +25,27 @@ class ApiTests(unittest.TestCase):
     def test_logout_revokes_session(self):
         self.assertEqual(self.client.post('/auth/logout',headers=self.headers).status_code,200);self.assertEqual(self.client.get('/auth/me',headers=self.headers).status_code,401)
     def test_invalid_id_rejected(self):self.assertEqual(self.client.post('/downloads',headers=self.headers,json={'video_id':'bad;command'}).status_code,422)
-    def test_no_permission_rejected(self):self.assertEqual(self.client.post('/downloads',headers=self.headers,json={'video_id':'abcdefghijk'}).status_code,403)
     def test_cookie_csrf_origin_rejected(self):self.assertEqual(self.client.post('/auth/logout',headers={**self.headers,'Origin':'https://attacker.example'}).status_code,403)
     def test_user_cannot_read_other_jobs(self):self.assertEqual(self.client.post('/downloads/other-user-job/cancel',headers=self.headers).status_code,404)
     def test_file_requires_ownership(self):self.assertEqual(self.client.get('/files/abcdefghijk',headers=self.headers).status_code,404)
-    def test_non_admin_cannot_manage_authorized_videos(self):
-        self.assertEqual(self.client.get('/admin/authorized-videos',headers=self.bob_headers).status_code,403)
-        self.assertEqual(self.client.post('/admin/authorized-videos',headers=self.bob_headers,json={'video_id':'abcdefghijk'}).status_code,403)
-    def test_admin_can_add_and_remove_authorized_videos(self):
-        with patch.dict(os.environ,{'ADMIN_EMAILS':'alice@example.com'}):
-            self.assertEqual(self.client.post('/admin/authorized-videos',headers=self.headers,json={'video_id':'abcdefghijk'}).status_code,200)
-            items = self.client.get('/admin/authorized-videos',headers=self.headers).json()['items']
-            self.assertEqual([i['video_id'] for i in items],['abcdefghijk']);self.assertEqual(items[0]['added_by'],'alice')
-            self.assertEqual(self.client.delete('/admin/authorized-videos/abcdefghijk',headers=self.headers).status_code,200)
-            self.assertEqual(self.client.get('/admin/authorized-videos',headers=self.headers).json()['items'],[])
-    def test_admin_authorization_rejects_malformed_id(self):
-        with patch.dict(os.environ,{'ADMIN_EMAILS':'alice@example.com'}):
-            self.assertEqual(self.client.post('/admin/authorized-videos',headers=self.headers,json={'video_id':'bad;command'}).status_code,422)
-            self.assertEqual(self.client.delete('/admin/authorized-videos/bad;command',headers=self.headers).status_code,400)
-    def test_download_allowed_once_admin_authorizes(self):
+    def test_download_needs_no_permission_flag_or_approval_list(self):
         track = {'id':'abcdefghijk','source':'youtube','title':'Song','artist':'Artist','duration':200,'thumbnail':'','classification':'MUSIC'}
-        with patch.dict(os.environ,{'ADMIN_EMAILS':'alice@example.com'}):
-            self.client.post('/admin/authorized-videos',headers=self.headers,json={'video_id':'abcdefghijk'})
         with patch.object(main.youtube,'getMusicMetadata',new=AsyncMock(return_value=track)):
-            response = self.client.post('/downloads',headers=self.headers,json={'video_id':'abcdefghijk','permission_confirmed':True})
-        self.assertEqual(response.status_code,200)
-
+            response = self.client.post('/downloads',headers=self.headers,json={'video_id':'abcdefghijk'})
+        self.assertEqual(response.status_code,200);self.assertEqual(response.json()['state'],'QUEUED')
+    def test_admin_catalog_endpoints_are_gone(self):
+        self.assertEqual(self.client.get('/admin/authorized-videos',headers=self.headers).status_code,404)
     def test_download_url_must_match_video_id(self):
         for url in ['https://evil.test/watch?v=abcdefghijk','https://www.youtube.com/watch?v=zzzzzzzzzzz','file:///etc/passwd']:
-            response = self.client.post('/downloads',headers=self.headers,json={'video_id':'abcdefghijk','url':url,'permission_confirmed':True})
+            response = self.client.post('/downloads',headers=self.headers,json={'video_id':'abcdefghijk','url':url})
             self.assertEqual(response.status_code,400,url)
     def test_playlist_id_is_validated(self):
         response = self.client.post('/downloads',headers=self.headers,json={'video_id':'abcdefghijk','playlist_id':'../../etc; rm'})
         self.assertEqual(response.status_code,422)
     def test_matching_url_and_playlist_are_accepted_and_reported(self):
         track = {'id':'abcdefghijk','source':'youtube','title':'Song','artist':'Artist','duration':200,'thumbnail':'','classification':'MUSIC'}
-        self.db.add_authorized('abcdefghijk','alice')
         with patch.object(main.youtube,'getMusicMetadata',new=AsyncMock(return_value=track)):
-            response = self.client.post('/downloads',headers=self.headers,json={'video_id':'abcdefghijk','url':'https://youtu.be/abcdefghijk','playlist_id':'local-road_trip','permission_confirmed':True})
+            response = self.client.post('/downloads',headers=self.headers,json={'video_id':'abcdefghijk','url':'https://youtu.be/abcdefghijk','playlist_id':'local-road_trip'})
         self.assertEqual(response.status_code,200);self.assertEqual(response.json()['playlist_id'],'local-road_trip')
         status = self.client.get('/downloads/'+response.json()['id'],headers=self.headers).json()
         self.assertEqual(status['status'],'queued');self.assertEqual(status['title'],'Song');self.assertNotIn('user_id',status)

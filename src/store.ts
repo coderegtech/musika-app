@@ -25,7 +25,7 @@ import { saveAudio, deleteAudio } from "./services/media";
 import { request } from "./services/api";
 type Tab = "Home" | "Search" | "Downloads" | "Library" | "Profile";
 export type ActionMode =
-  "menu" | "download" | "downloadToPlaylist" | "addToPlaylist" | "delete";
+  "menu" | "downloadToPlaylist" | "addToPlaylist" | "delete";
 /** A multi-track download (e.g. a whole playlist) whose overall progress is shown together. */
 export type Batch = {
   ids: string[];
@@ -87,13 +87,11 @@ type State = {
   remove: (track: Track) => Promise<void>;
   enqueue: (
     tracks: Track[],
-    permission: boolean,
     allowDuplicate?: boolean,
     playlistId?: string,
   ) => Promise<void>;
   downloadTracks: (
     tracks: Track[],
-    permission: boolean,
     options?: { playlistId?: string; label?: string },
   ) => Promise<void>;
   quickDownload: (track: Track) => void;
@@ -385,18 +383,7 @@ export const useStore = create<State>()(
           if (names.length)
             get().notify(`Downloaded and added to "${names[0]}" ✓`);
         },
-        enqueue: async (
-          tracks,
-          permission,
-          allowDuplicate = false,
-          playlistId,
-        ) => {
-          if (!permission) {
-            get().notify(
-              "Confirm that you have permission to download this music.",
-            );
-            return;
-          }
+        enqueue: async (tracks, allowDuplicate = false, playlistId) => {
           const playlistName = get().playlists.find(
             (p) => p.id === playlistId,
           )?.title;
@@ -454,7 +441,6 @@ export const useStore = create<State>()(
                       playlist_id: playlistId,
                       format: get().format,
                       quality: get().quality,
-                      permission_confirmed: permission,
                       allow_duplicate: allowDuplicate,
                     }),
                   },
@@ -515,11 +501,11 @@ export const useStore = create<State>()(
           else if (DEMO)
             get().notify("These tracks are already saved or queued.");
         },
-        downloadTracks: async (tracks, permission, options = {}) => {
+        downloadTracks: async (tracks, options = {}) => {
           const ids = tracks
             .filter((t) => duplicate(t, get().library) === "NEW")
             .map((t) => t.id);
-          if (ids.length && permission)
+          if (ids.length)
             set({
               batch: {
                 ids,
@@ -528,7 +514,7 @@ export const useStore = create<State>()(
                 failed: [],
               },
             });
-          await get().enqueue(tracks, permission, false, options.playlistId);
+          await get().enqueue(tracks, false, options.playlistId);
           // Tracks that never got a job (e.g. held back as possible duplicates) count as already available.
           const batch = get().batch;
           if (!batch) return;
@@ -554,11 +540,10 @@ export const useStore = create<State>()(
         quickDownload: (track) => {
           if (get().library.some((t) => t.id === track.id))
             get().openActions(track, "menu");
-          else if (DEMO)
+          else
             void get()
-              .enqueue([track], true)
+              .enqueue([track])
               .catch((e) => get().notify(e.message));
-          else get().openActions(track, "download");
         },
         queueAction: async (action, id) => {
           if (action === "remove" && id)
