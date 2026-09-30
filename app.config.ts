@@ -51,6 +51,6 @@ export default {
     ],
     // Filled in by `eas init` (run once, after `eas login`) so EAS Build
     // knows which project this app belongs to on your Expo account.
-    extra: { eas: { projectId: process.env.EAS_PROJECT_ID || "7c04b495-1dc6-4288-86b6-c50ebfbdd75b" } },
+    extra: { eas: { projectId: process.env.EAS_PROJECT_ID || "6c78bf59-630a-45a9-b1cc-f6e1cff82b5c" } },
   },
 };
