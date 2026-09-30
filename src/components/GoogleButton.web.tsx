@@ -1,18 +1,13 @@
-import React, { useEffect, useRef } from "react";
-import { exchangeGoogle } from "../services/auth";
+import React, { useState } from "react";
+import { FirebaseError } from "firebase/app";
+import { GoogleAuthProvider, signInWithPopup } from "firebase/auth";
+import { exchangeFirebase } from "../services/auth";
+import { firebaseAuth, firebaseConfigured } from "../services/firebase";
 import { User } from "../models";
-declare global {
-  interface Window {
-    google?: {
-      accounts: {
-        id: {
-          initialize: (options: object) => void;
-          renderButton: (element: HTMLElement, options: object) => void;
-        };
-      };
-    };
-  }
-}
+const CANCELLED = new Set([
+  "auth/popup-closed-by-user",
+  "auth/cancelled-popup-request",
+]);
 export default function GoogleButton({
   onSuccess,
   onError,
@@ -20,64 +15,43 @@ export default function GoogleButton({
   onSuccess: (u: User) => void;
   onError: (e: string) => void;
 }) {
-  const ref = useRef<HTMLDivElement>(null);
-  useEffect(() => {
-    const client = process.env.EXPO_PUBLIC_GOOGLE_WEB_CLIENT_ID;
-    if (!client) return;
-    let active = true;
-    const init = () => {
-      if (!active || !ref.current || !window.google) return;
-      window.google.accounts.id.initialize({
-        client_id: client,
-        callback: async (r: { credential: string }) => {
-          try {
-            onSuccess(await exchangeGoogle(r.credential));
-          } catch (e) {
-            onError((e as Error).message);
-          }
-        },
-      });
-      window.google.accounts.id.renderButton(ref.current, {
-        theme: "outline",
-        size: "large",
-        width: 300,
-        text: "continue_with",
-      });
-    };
-    if (window.google) init();
-    else {
-      const script = document.createElement("script");
-      script.src = "https://accounts.google.com/gsi/client";
-      script.async = true;
-      script.onload = init;
-      script.onerror = () =>
-        onError("Google could not load. Check your connection.");
-      document.head.appendChild(script);
+  const [busy, setBusy] = useState(false);
+  const signIn = async () => {
+    if (!firebaseConfigured)
+      return onError(
+        "Google sign-in needs your Firebase config. Configure .env, then restart Expo.",
+      );
+    setBusy(true);
+    try {
+      const provider = new GoogleAuthProvider();
+      provider.setCustomParameters({ prompt: "select_account" });
+      const { user } = await signInWithPopup(firebaseAuth(), provider);
+      onSuccess(await exchangeFirebase(await user.getIdToken()));
+    } catch (e) {
+      if (e instanceof FirebaseError && CANCELLED.has(e.code)) return;
+      if (e instanceof FirebaseError && e.code === "auth/popup-blocked")
+        return onError("Allow pop-ups for this site to sign in with Google.");
+      onError(e instanceof Error ? e.message : "Google sign-in failed.");
+    } finally {
+      setBusy(false);
     }
-    return () => {
-      active = false;
-    };
-  }, []);
-  return process.env.EXPO_PUBLIC_GOOGLE_WEB_CLIENT_ID ? (
-    <div ref={ref} />
-  ) : (
+  };
+  return (
     <button
-      onClick={() =>
-        onError(
-          "Google sign-in needs your OAuth client ID. Configure .env, then restart Expo.",
-        )
-      }
+      onClick={signIn}
+      disabled={busy}
       style={{
         border: "1px solid #D9DED4",
         background: "#fff",
         padding: "16px 28px",
         borderRadius: 12,
         fontSize: 15,
-        cursor: "pointer",
+        cursor: busy ? "default" : "pointer",
+        opacity: busy ? 0.6 : 1,
         width: "100%",
       }}
     >
-      Continue with Google
+      {busy ? "Signing in…" : "Continue with Google"}
     </button>
   );
 }

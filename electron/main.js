@@ -19,7 +19,7 @@ const MIME = {
 };
 
 // Serves the static Expo web export over http(s)-style localhost instead of
-// file://, since Google Identity Services requires a real origin to render.
+// file://, since Firebase Auth requires a real (authorized-domain) origin.
 function serve() {
   return new Promise((resolve) => {
     const server = http.createServer((req, res) => {
@@ -60,8 +60,15 @@ async function createWindow() {
     webPreferences: { contextIsolation: true, sandbox: true },
   });
   win.loadURL(`http://127.0.0.1:${PORT}`);
-  // Open external links (e.g. an eventual "About" link) in the OS browser.
+  // Firebase's Google sign-in popup must open in-app so it can post the result
+  // back to this window; other external links open in the OS browser.
   win.webContents.setWindowOpenHandler(({ url }) => {
+    const { protocol, hostname } = new URL(url);
+    if (
+      protocol === "https:" &&
+      (hostname.endsWith(".firebaseapp.com") || hostname.endsWith(".web.app"))
+    )
+      return { action: "allow" };
     shell.openExternal(url);
     return { action: "deny" };
   });

@@ -1,0 +1,40 @@
+# Render Blueprint for the Musika API (server/ only -- the web app stays on Vercel).
+# Dashboard -> New -> Blueprint -> pick this repo. Values marked `sync: false`
+# are prompted for on first deploy; see server/.env.example for what each means.
+services:
+  - type: web
+    name: musika-api
+    runtime: docker
+    dockerContext: ./server
+    dockerfilePath: ./server/Dockerfile
+    # A persistent disk (required: SQLite users/sessions/library + downloaded
+    # audio live in server/data) needs a paid instance; free has no disks.
+    plan: starter
+    region: singapore
+    healthCheckPath: /health
+    # Only redeploy when the API itself changes, not on frontend commits.
+    buildFilter:
+      paths:
+        - server/**
+    disk:
+      name: musika-data
+      mountPath: /app/server/data
+      sizeGB: 5
+    envVars:
+      - key: PORT
+        value: "8000"
+      - key: ENVIRONMENT
+        value: production
+      # Frontend (vercel.app) and API (onrender.com) are different sites.
+      - key: COOKIE_SAMESITE
+        value: none
+      - key: FIREBASE_PROJECT_ID
+        sync: false
+      - key: YOUTUBE_API_KEY
+        sync: false
+      - key: MUSIKA_ORIGINS
+        sync: false
+      - key: ADMIN_EMAILS
+        sync: false
+      - key: AUTHORIZED_VIDEO_IDS
+        sync: false

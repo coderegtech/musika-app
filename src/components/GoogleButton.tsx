@@ -4,7 +4,9 @@ import {
   GoogleSignin,
   isSuccessResponse,
 } from "@react-native-google-signin/google-signin";
-import { exchangeGoogle } from "../services/auth";
+import { GoogleAuthProvider, signInWithCredential } from "firebase/auth";
+import { exchangeFirebase } from "../services/auth";
+import { firebaseAuth } from "../services/firebase";
 import { User } from "../models";
 export default function GoogleButton({
   onSuccess,
@@ -26,9 +28,10 @@ export default function GoogleButton({
       }}
       onPress={async () => {
         try {
+          const auth = firebaseAuth();
           if (!process.env.EXPO_PUBLIC_GOOGLE_WEB_CLIENT_ID)
             throw new Error(
-              "Add your Google OAuth client IDs to enable sign-in.",
+              "Add your Firebase web client ID to enable sign-in.",
             );
           GoogleSignin.configure({
             webClientId: process.env.EXPO_PUBLIC_GOOGLE_WEB_CLIENT_ID,
@@ -36,8 +39,13 @@ export default function GoogleButton({
           });
           await GoogleSignin.hasPlayServices();
           const result = await GoogleSignin.signIn();
-          if (isSuccessResponse(result) && result.data.idToken)
-            onSuccess(await exchangeGoogle(result.data.idToken));
+          if (isSuccessResponse(result) && result.data.idToken) {
+            const { user } = await signInWithCredential(
+              auth,
+              GoogleAuthProvider.credential(result.data.idToken),
+            );
+            onSuccess(await exchangeFirebase(await user.getIdToken()));
+          }
         } catch (e) {
           onError(e instanceof Error ? e.message : "Google sign-in failed.");
         }

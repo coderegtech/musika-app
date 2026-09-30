@@ -23,7 +23,7 @@ npm run web
 
 ## Connect Google and YouTube
 
-Every credential below is free — Google OAuth has no cost at any scale, and the YouTube Data API is quota-limited (10,000 free units/day by default; a search costs 100) rather than pay-per-use. Do this once at [console.cloud.google.com](https://console.cloud.google.com); each step names the exact env key(s) it fills in and **which of the two `.env` files** it goes in:
+Every credential below is free — Firebase Authentication with Google sign-in is free on the Spark plan, and the YouTube Data API is quota-limited (10,000 free units/day by default; a search costs 100) rather than pay-per-use. Do this once at [console.cloud.google.com](https://console.cloud.google.com); each step names the exact env key(s) it fills in and **which of the two `.env` files** it goes in:
 
 - Root `.env` (copy from `.env.example`) — client config, read by Expo/EAS/Electron at build time.
 - `server/.env` (copy from `server/.env.example`) — server-only secrets, read only by the API. Never put one of these values in the root `.env`, or vice versa.
@@ -33,23 +33,23 @@ Every credential below is free — Google OAuth has no cost at any scale, and th
 | 1 | New project (or pick an existing one). | — |
 | 2 | **APIs & Services → Library** → enable "YouTube Data API v3". | — |
 | 3 | **APIs & Services → Credentials → Create Credentials → API key.** Restrict it: API restrictions → YouTube Data API v3 only; application restrictions → your server's IP once deployed (leave unrestricted only for local testing). | `YOUTUBE_API_KEY` in **`server/.env`** — never in the root `.env` or any `EXPO_PUBLIC_` var |
-| 4 | **APIs & Services → OAuth consent screen** → External → app name "Musika", your email as contact. Leave scopes at the default (openid/email/profile) — Musika never requests YouTube-account access. Leave **Publishing status: Testing** and add yourself under "Test users" — this skips Google's verification review entirely for personal use (up to 100 test users). | — |
-| 5 | **Create Credentials → OAuth client ID → Web application.** Authorized JavaScript origins: `http://localhost:8081` (Expo web dev), plus `http://127.0.0.1:17321` if you'll use the Electron desktop build, plus your production HTTPS origin if you deploy one. | `GOOGLE_CLIENT_ID` in **`server/.env`** and `EXPO_PUBLIC_GOOGLE_WEB_CLIENT_ID` in the **root `.env`** (same value in both — the server verifies tokens against it, the web client requests them with it) |
-| 6 | **Create Credentials → OAuth client ID → Android.** Package name `app.musika.mobile` (already set in `app.config.ts`). SHA-1: run `npx eas credentials` → Android → your build profile → view the keystore, or get it after your first `npm run build:android`. | `GOOGLE_ANDROID_CLIENT_ID` in **`server/.env`** (no client-side var needed — native Google Sign-In matches by package name + SHA-1, not by ID in code) |
-| 7 | **Create Credentials → OAuth client ID → iOS** (only if you'll build for iOS — needs a Mac). Bundle ID `app.musika.mobile`. | `GOOGLE_IOS_CLIENT_ID` in **`server/.env`**; `EXPO_PUBLIC_GOOGLE_IOS_CLIENT_ID` (same value) and `GOOGLE_IOS_URL_SCHEME` (that ID with its segments reversed, e.g. `123-abc.apps.googleusercontent.com` → `com.googleusercontent.apps.123-abc`) in the **root `.env`** |
+| 4 | Go to [console.firebase.google.com](https://console.firebase.google.com) → **Add project** → pick the same Google Cloud project from step 1 (Analytics can stay off). Then **Build → Authentication → Get started → Sign-in method → Google → Enable**, choosing your email as support email. This creates the OAuth consent screen and a "Web client (auto created by Google Service)" OAuth client for you. | `FIREBASE_PROJECT_ID` in **`server/.env`** (the project ID shown in Project settings — the server only accepts tokens issued for this project) |
+| 5 | **Project settings → General → Your apps → Add app → Web** (nickname "Musika", no Hosting). Copy `apiKey`, `authDomain`, `projectId`, `appId` from the config it shows. Then **Authentication → Settings → Authorized domains**: `localhost` is there by default; add `127.0.0.1` if you'll use the Electron desktop build, plus your production domain (e.g. `musika-app.vercel.app`) if you deploy one. | `EXPO_PUBLIC_FIREBASE_API_KEY`, `EXPO_PUBLIC_FIREBASE_AUTH_DOMAIN`, `EXPO_PUBLIC_FIREBASE_PROJECT_ID`, `EXPO_PUBLIC_FIREBASE_APP_ID` in the **root `.env`** |
+| 6 | **Android** (native Google sign-in): **Project settings → Add app → Android**, package `app.musika.mobile`, and add the SHA-1 from `npx eas credentials` → Android → your build profile (or after your first `npm run build:android`). Firebase creates the matching Android OAuth client. Then in **Authentication → Sign-in method → Google → Web SDK configuration**, copy the **Web client ID**. | `EXPO_PUBLIC_GOOGLE_WEB_CLIENT_ID` in the **root `.env`** (that Web client ID — native Google Sign-In requests an ID token for it, which Firebase then accepts) |
+| 7 | **iOS** (only if you'll build for iOS — needs a Mac): **Project settings → Add app → iOS**, bundle ID `app.musika.mobile`, then open the downloaded `GoogleService-Info.plist` and copy `CLIENT_ID` and `REVERSED_CLIENT_ID`. | `EXPO_PUBLIC_GOOGLE_IOS_CLIENT_ID` (`CLIENT_ID`) and `GOOGLE_IOS_URL_SCHEME` (`REVERSED_CLIENT_ID`) in the **root `.env`** |
 | 8 | Add your own Google account email. | `ADMIN_EMAILS` in **`server/.env`** — lets that signed-in account call `/admin/authorized-videos` to approve videos for download live, without a server restart. `AUTHORIZED_VIDEO_IDS` (also `server/.env`) can stay blank; it's only a fixed fallback seed list. |
 | 9 | Point the client at your running server. | `EXPO_PUBLIC_API_URL` in the **root `.env`** — a physical device needs a real reachable address, not `localhost`. `MUSIKA_ORIGINS` in **`server/.env`** — comma-separated exact browser origins allowed to call the API (needed for the HTTP-only session cookie's CORS/CSRF check). |
 | 10 | Once 1–9 are filled in, flip demo mode off. | `EXPO_PUBLIC_DEMO=false` in the **root `.env`** |
 
 `EXPO_PUBLIC_*` values are inlined into the JS bundle at build time, not read at runtime — restart `expo start` / rebuild after changing any of them.
 
-**Cloud Android builds can't see your local root `.env`.** `npx eas build` runs on Expo's own servers, and `.env` is gitignored, so it never uploads. Any `EXPO_PUBLIC_*` value the APK needs (the web/iOS client IDs, `EXPO_PUBLIC_API_URL`, `EXPO_PUBLIC_DEMO`) must also be set as an `"env"` block on the build profile in `eas.json`, e.g.:
+**Cloud Android builds can't see your local root `.env`.** `npx eas build` runs on Expo's own servers, and `.env` is gitignored, so it never uploads. Any `EXPO_PUBLIC_*` value the APK needs (the `EXPO_PUBLIC_FIREBASE_*` config, the web/iOS client IDs, `EXPO_PUBLIC_API_URL`, `EXPO_PUBLIC_DEMO`) must also be set as an `"env"` block on the build profile in `eas.json`, e.g.:
 
 ```json
 "preview": {
   "distribution": "internal",
   "android": { "buildType": "apk" },
-  "env": { "EXPO_PUBLIC_DEMO": "false", "EXPO_PUBLIC_API_URL": "https://your-server", "EXPO_PUBLIC_GOOGLE_WEB_CLIENT_ID": "..." }
+  "env": { "EXPO_PUBLIC_DEMO": "false", "EXPO_PUBLIC_API_URL": "https://your-server", "EXPO_PUBLIC_FIREBASE_API_KEY": "...", "EXPO_PUBLIC_FIREBASE_AUTH_DOMAIN": "...", "EXPO_PUBLIC_FIREBASE_PROJECT_ID": "...", "EXPO_PUBLIC_FIREBASE_APP_ID": "...", "EXPO_PUBLIC_GOOGLE_WEB_CLIENT_ID": "..." }
 }
 ```
 
@@ -57,7 +57,7 @@ These are all public client identifiers (that's what `EXPO_PUBLIC_` means), so c
 
 For production, also set `ENVIRONMENT=production` in `server/.env` (requires secure cookies) and serve the frontend/API from the same site over HTTPS (the session cookie is same-site, HTTP-only).
 
-Only basic Google identity scopes are used. Discovery uses the server API key and does not request access to the user's YouTube account. Google ID tokens are verified server-side against configured audiences and exchanged for random, revocable, 30-day Musika sessions. Native tokens use SecureStore; browser sessions use HTTP-only cookies. Authentication failure clears the native token and prompts reauthentication.
+Only basic Google identity scopes are used. Discovery uses the server API key and does not request access to the user's YouTube account. Sign-in goes through Firebase Authentication (Google provider only): the client sends a Firebase ID token, which the server verifies against `FIREBASE_PROJECT_ID` (signature, issuer, audience, `google.com` provider, verified email) and exchanges for random, revocable, 30-day Musika sessions. Native tokens use SecureStore; browser sessions use HTTP-only cookies. Authentication failure clears the native token and prompts reauthentication.
 
 ## Start the API
 
@@ -100,8 +100,18 @@ It reads `server/.env` (via `env_file`) — the same file the venv-based run abo
    ```
    (`--restart unless-stopped` brings it back up after a VPS reboot or crash; the image has a built-in `HEALTHCHECK` against `/health` that `docker ps` will report.)
 4. Put it behind a reverse proxy for HTTPS — the app needs a real TLS origin for the session cookie and CORS to work correctly in production. [Caddy](https://caddyserver.com/) is the least setup for this: point a domain's A record at the VPS, then a two-line Caddyfile (`your-domain.com { reverse_proxy localhost:8000 }`) gets you automatic Let's Encrypt certificates.
-5. Update `server/.env` on the VPS for production: `ENVIRONMENT=production` (requires secure cookies), `MUSIKA_ORIGINS` set to your actual frontend origin(s) (e.g. your Vercel URL), and the Google OAuth Web client's authorized origins to match.
+5. Update `server/.env` on the VPS for production: `ENVIRONMENT=production` (requires secure cookies), `MUSIKA_ORIGINS` set to your actual frontend origin(s) (e.g. your Vercel URL), and Firebase Authentication's authorized domains to match.
 6. Point the client at it: set `EXPO_PUBLIC_API_URL=https://your-domain.com` wherever the frontend is built (root `.env` for local/Electron builds, `eas.json`'s `env` block for EAS, Vercel's Environment Variables for the web deploy — see those sections below) — since it's a public HTTPS URL now, a physical device or the Vercel deployment can reach it too, not just your LAN.
+
+### Deploy the API to Render
+
+[render.yaml](render.yaml) is a Render Blueprint that builds the same `server/Dockerfile`, with a persistent disk mounted on `server/data` (SQLite + downloaded audio). Vercel can't host this API: its functions have no persistent disk and can't run the always-on download worker.
+
+1. Push this repo to GitHub, then in [dashboard.render.com](https://dashboard.render.com) → **New → Blueprint** → pick the repo. It creates `musika-api` on the **Starter** plan (persistent disks aren't available on the free plan).
+2. Fill in the prompted values: `FIREBASE_PROJECT_ID`, `YOUTUBE_API_KEY`, `MUSIKA_ORIGINS` (your exact Vercel origin, e.g. `https://musika-app.vercel.app`), `ADMIN_EMAILS`, and optionally `AUTHORIZED_VIDEO_IDS`. `ENVIRONMENT=production` and `COOKIE_SAMESITE=none` are preset — the web app (`vercel.app`) and API (`onrender.com`) are different sites, so the session cookie must be cross-site.
+3. Once live, set `EXPO_PUBLIC_API_URL=https://musika-api.onrender.com` (your service's URL) in Vercel's Environment Variables and `eas.json`, then redeploy the frontend.
+
+Browsers that block third-party cookies (Safari, or Chrome with that setting on) won't keep a web session across the two sites. If that matters, give both a shared custom domain (e.g. `app.example.com` on Vercel, `api.example.com` on Render) and set `COOKIE_SAMESITE=lax`. The native apps use bearer tokens and aren't affected.
 
 ## Personal builds (Android APK / Windows desktop)
 
@@ -117,7 +127,7 @@ npm run build:android
 
 `eas init` prints a project ID; paste it into `.env` as `EAS_PROJECT_ID=...` (read by `app.config.ts`). The build runs on Expo's servers and finishes with a download link for a directly-installable `.apk` — enable "install unknown apps" for your file manager/browser on the phone to sideload it. Because Google Sign-In needs a signed build (unsupported in Expo Go), this is also the way to test real Google/YouTube login on-device — see step 6 above for the Android OAuth client this build needs, and the note above about mirroring `EXPO_PUBLIC_*` values into `eas.json` since this build never sees your local `.env`.
 
-**Windows desktop app**, via the `electron/` wrapper (loads the same UI, served locally so Google Identity Services still has a real origin to attach to):
+**Windows desktop app**, via the `electron/` wrapper (loads the same UI, served locally so Firebase Auth still has a real, authorized origin):
 
 ```powershell
 npm run desktop         # run it directly
@@ -132,11 +142,11 @@ Vercel can only host the static **web client** ([vercel.json](vercel.json) runs 
 
 1. [vercel.com/new](https://vercel.com/new) → **Import Git Repository** → pick `coderegtech/musika-app`. Vercel auto-detects `vercel.json`; no manual build settings needed. Or from the CLI: `npx vercel login` then `npx vercel --prod`.
 2. **Leave `EXPO_PUBLIC_DEMO` unset** (or explicitly `true`) in the Vercel project's Environment Variables if you just want a public, self-contained demo — it needs no API/credentials at all, since `EXPO_PUBLIC_DEMO` defaults to `true` when unset.
-3. To deploy the **real** app instead, set `EXPO_PUBLIC_DEMO=false` and `EXPO_PUBLIC_API_URL=<your deployed API's HTTPS URL>` as Vercel Environment Variables (Project → Settings → Environment Variables), then redeploy. Like the EAS builds, Vercel's build never sees your local, gitignored `.env` — every `EXPO_PUBLIC_*` value the deployed site needs has to be set there instead. Also add the Vercel deployment's exact origin (e.g. `https://musika-app.vercel.app`) to the API server's `MUSIKA_ORIGINS`, and as an authorized JavaScript origin on the Google **Web** OAuth client (step 5 above).
+3. To deploy the **real** app instead, set `EXPO_PUBLIC_DEMO=false` and `EXPO_PUBLIC_API_URL=<your deployed API's HTTPS URL>` as Vercel Environment Variables (Project → Settings → Environment Variables), then redeploy. Like the EAS builds, Vercel's build never sees your local, gitignored `.env` — every `EXPO_PUBLIC_*` value the deployed site needs has to be set there instead. Also add the Vercel deployment's exact origin (e.g. `https://musika-app.vercel.app`) to the API server's `MUSIKA_ORIGINS`, and its domain to Firebase Authentication's authorized domains (step 5 above).
 
 ## What is implemented
 
-- Google native SDK sign-in / Google Identity Services on web, backend token verification, secure sessions, restore, expiry, logout, and error states.
+- Firebase Authentication with Google (native Google SDK credential on Android/iOS, popup on web/desktop), backend Firebase token verification, secure sessions, restore, expiry, logout, and error states.
 - Music-only discovery, search with 500 ms debounce and stale-request cancellation, YouTube page tokens, five-minute server caching, request deduplication, and video metadata batching.
 - Reusable music classification and metadata extraction, with original titles and descriptions preserved. Confidence uses category, music topics, channel/title/description signals, and duration. This is a heuristic, not a guarantee of musical content.
 - Details before download; local downloaded indicators; exact source-ID, normalized title/artist/duration, and post-download SHA-256 duplicate detection.
@@ -188,6 +198,8 @@ Remote demo artwork is served by Unsplash and needs a connection; downloaded aud
 
 - [Expo Audio](https://docs.expo.dev/versions/v54.0.0/sdk/audio/)
 - [Expo Google authentication](https://docs.expo.dev/guides/google-authentication/)
+- [Firebase Auth with Google](https://firebase.google.com/docs/auth/web/google-signin)
+- [Using Firebase with Expo](https://docs.expo.dev/guides/using-firebase/)
 - [YouTube search and pagination](https://developers.google.com/youtube/v3/docs/search/list)
 - [yt-dlp](https://github.com/yt-dlp/yt-dlp)
 

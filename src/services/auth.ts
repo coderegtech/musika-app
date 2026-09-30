@@ -1,6 +1,8 @@
 import { Platform } from "react-native";
 import * as SecureStore from "expo-secure-store";
+import { signOut as fbSignOut } from "firebase/auth";
 import { API, User } from "../models";
+import { firebaseAuth, firebaseConfigured } from "./firebase";
 let token: string | null = null;
 const expiredListeners = new Set<() => void>();
 export function onSessionExpired(callback: () => void) {
@@ -34,8 +36,8 @@ export async function clearSession() {
   if (Platform.OS !== "web")
     await SecureStore.deleteItemAsync("musika.session");
 }
-export async function exchangeGoogle(idToken: string): Promise<User> {
-  const result = await fetch(`${API}/auth/google`, {
+export async function exchangeFirebase(idToken: string): Promise<User> {
+  const result = await fetch(`${API}/auth/firebase`, {
     method: "POST",
     credentials: "include",
     headers: { "Content-Type": "application/json" },
@@ -56,4 +58,5 @@ export async function signOut() {
   if (!result.ok && result.status !== 401)
     throw new Error("Could not sign out. Try again when connected.");
   await clearSession();
+  if (firebaseConfigured) await fbSignOut(firebaseAuth()).catch(() => {});
 }

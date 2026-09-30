@@ -69,27 +69,42 @@ def admin(user=Depends(session)):
 def authorized(video_id):
     return video_id in os.getenv('AUTHORIZED_VIDEO_IDS','').split(',') or db.is_authorized(video_id)
 
-class GoogleLogin(BaseModel):
+def cookie_options():
+    # 'none' is needed when the web app and API are on different sites (e.g. vercel.app + onrender.com);
+    # the Origin check in the security middleware still blocks cross-site writes from other origins.
+    samesite = os.getenv('COOKIE_SAMESITE','lax').lower()
+    return {'httponly':True,'samesite':samesite,'secure':samesite=='none' or os.getenv('ENVIRONMENT')=='production'}
+
+class FirebaseLogin(BaseModel):
     idToken: str = Field(max_length=10000)
 
-@app.post('/auth/google')
-async def login(body:GoogleLogin,response:Response):
+def verify_firebase(token,project):
     from google.oauth2 import id_token
     from google.auth.transport.requests import Request as GoogleRequest
-    audiences = [os.getenv(k) for k in ('GOOGLE_CLIENT_ID','GOOGLE_ANDROID_CLIENT_ID','GOOGLE_IOS_CLIENT_ID') if os.getenv(k)]
-    if not audiences: raise HTTPException(503,'Google sign-in is not configured on the server.')
+    claims = id_token.verify_firebase_token(token,GoogleRequest(),audience=project)
+    if claims.get('iss')!=f'https://securetoken.google.com/{project}': raise ValueError('Invalid issuer')
+    if claims.get('firebase',{}).get('sign_in_provider')!='google.com' or not claims.get('email_verified'): raise ValueError('Not a verified Google account')
+    return claims
+
+@app.post('/auth/firebase')
+async def login(body:FirebaseLogin,response:Response):
+    project = os.getenv('FIREBASE_PROJECT_ID')
+    if not project: raise HTTPException(503,'Firebase sign-in is not configured on the server.')
     try:
-        claims = await asyncio.to_thread(id_token.verify_oauth2_token,body.idToken,GoogleRequest())
-        if claims['aud'] not in audiences or not claims.get('email_verified'): raise ValueError('Invalid audience')
+        claims = await asyncio.to_thread(verify_firebase,body.idToken,project)
     except Exception:
         raise HTTPException(401,'Google could not verify this account.')
+    # Key users by their Google account ID (not the Firebase UID) so libraries
+    # created before the Firebase migration stay attached to the same person.
+    google_ids = claims['firebase'].get('identities',{}).get('google.com') or [claims['sub']]
+    claims = {**claims,'sub':google_ids[0]}
     user = {k:claims.get(k) for k in ('sub','name','email','picture')}
     token = secrets.token_urlsafe(48)
     with db.connect() as conn:
         conn.execute('INSERT OR REPLACE INTO users VALUES(?,?)',(claims['sub'],json.dumps(user)))
         conn.execute('DELETE FROM sessions WHERE expires<?',(time.time(),))
         conn.execute('INSERT INTO sessions VALUES(?,?,?)',(hashlib.sha256(token.encode()).hexdigest(),claims['sub'],time.time()+86400*30))
-    response.set_cookie('musika_session',token,httponly=True,secure=os.getenv('ENVIRONMENT')=='production',samesite='lax',max_age=86400*30)
+    response.set_cookie('musika_session',token,max_age=86400*30,**cookie_options())
     response.headers['Cache-Control'] = 'no-store'
     return {'token':token,'user':user}
 
@@ -101,7 +116,7 @@ def me(user=Depends(session)):
 def logout(request:Request,response:Response,user=Depends(session)):
     token = request.headers.get('authorization','').removeprefix('Bearer ') or request.cookies.get('musika_session','')
     with db.connect() as conn: conn.execute('DELETE FROM sessions WHERE token_hash=?',(hashlib.sha256(token.encode()).hexdigest(),))
-    response.delete_cookie('musika_session')
+    response.delete_cookie('musika_session',**cookie_options())
     return {'ok':True}
 
 @app.get('/health')
