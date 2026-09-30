@@ -15,6 +15,7 @@ export type Track = {
   album?: string;
   release?: string;
   localUri?: string;
+  localThumbnail?: string;
   downloaded_at?: string;
   file_hash?: string;
   bytes?: number;
@@ -28,6 +29,7 @@ export type Playlist = {
   description?: string;
   trackIds?: string[];
   color?: string;
+  updatedAt?: string;
 };
 export type DownloadState =
   | "QUEUED"
@@ -45,6 +47,10 @@ export type Download = {
   progress: number;
   error?: string;
   warning?: string;
+  stage?: string;
+  speed?: number | null;
+  bytes_total?: number;
+  playlist_id?: string | null;
 };
 export type Page<T> = { items: T[]; nextPageToken?: string };
 export type User = {
@@ -98,7 +104,12 @@ export function parseVideoUrl(input: string) {
     const id =
       host === "youtu.be"
         ? u.pathname.slice(1)
-        : ["youtube.com", "www.youtube.com", "m.youtube.com"].includes(host)
+        : [
+              "youtube.com",
+              "www.youtube.com",
+              "m.youtube.com",
+              "music.youtube.com",
+            ].includes(host)
           ? u.searchParams.get("v") ||
             u.pathname.match(/^\/(?:shorts|embed)\/([^/]+)$/)?.[1]
           : null;
@@ -106,4 +117,59 @@ export function parseVideoUrl(input: string) {
   } catch {
     return null;
   }
+}
+export const isLocalPlaylist = (p: Pick<Playlist, "id">) =>
+  p.id.startsWith("local-");
+/** The single canonical watch URL for a YouTube track, or null when it has none (demo/local audio). */
+export function canonicalUrl(
+  track: Pick<Track, "id" | "source" | "source_url">,
+) {
+  if (track.source !== "youtube") return null;
+  const id =
+    (track.source_url ? parseVideoUrl(track.source_url) : null) ||
+    (/^[-\w]{11}$/.test(track.id) ? track.id : null);
+  return id ? `https://www.youtube.com/watch?v=${id}` : null;
+}
+/** Prefer artwork cached on the device so covers still render offline. */
+export const artwork = (track: Pick<Track, "thumbnail" | "localThumbnail">) =>
+  track.localThumbnail || track.thumbnail;
+export function totalDuration(tracks: Pick<Track, "duration">[]) {
+  const total = Math.round(tracks.reduce((sum, t) => sum + t.duration, 0));
+  const hours = Math.floor(total / 3600),
+    minutes = Math.floor((total % 3600) / 60);
+  if (hours) return `${hours} hr ${minutes} min`;
+  return minutes ? `${minutes} min` : `${total} sec`;
+}
+export function formatBytes(bytes?: number | null) {
+  if (!bytes || bytes < 0) return "";
+  if (bytes < 1024 * 1024) return `${Math.max(1, Math.round(bytes / 1024))} KB`;
+  return `${(bytes / 1024 / 1024).toFixed(bytes < 10 * 1024 * 1024 ? 1 : 0)} MB`;
+}
+export const ACTIVE_STATES: DownloadState[] = [
+  "QUEUED",
+  "ANALYZING",
+  "DOWNLOADING",
+  "PROCESSING",
+];
+const STAGES: Record<DownloadState, string> = {
+  QUEUED: "Queued",
+  ANALYZING: "Fetching",
+  DOWNLOADING: "Downloading",
+  PROCESSING: "Converting",
+  COMPLETED: "Completed",
+  SKIPPED: "Already downloaded",
+  FAILED: "Failed",
+  CANCELLED: "Cancelled",
+};
+/** Human status line for the download manager: stage, percent, speed and size. */
+export function jobStatus(job: Download) {
+  const parts = [job.stage || STAGES[job.state]];
+  if (["DOWNLOADING", "PROCESSING"].includes(job.state))
+    parts.push(`${Math.round(job.progress)}%`);
+  if (job.state === "DOWNLOADING" && job.speed)
+    parts.push(`${formatBytes(job.speed)}/s`);
+  const size = formatBytes(job.bytes_total || job.track.bytes);
+  if (size && !["QUEUED", "FAILED", "CANCELLED"].includes(job.state))
+    parts.push(size);
+  return parts.join(" · ");
 }

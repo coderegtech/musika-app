@@ -74,14 +74,44 @@ export async function saveAudio(track: Track): Promise<Track> {
     track.id +
     "." +
     (track.source === "demo" ? "wav" : track.format || "mp3");
-  if (asset) await FileSystem.copyAsync({ from: url, to: path });
-  else {
-    const r = await FileSystem.downloadAsync(url, path, {
-      headers: authHeaders(),
-    });
-    if (r.status !== 200) throw new Error("Audio could not be saved.");
+  try {
+    if (asset) await FileSystem.copyAsync({ from: url, to: path });
+    else {
+      const r = await FileSystem.downloadAsync(url, path, {
+        headers: authHeaders(),
+      });
+      if (r.status !== 200) throw new Error("Audio could not be saved.");
+    }
+    // A track is only "saved" if a non-empty file really landed on the device.
+    const info = await FileSystem.getInfoAsync(path);
+    if (!info.exists || !info.size)
+      throw new Error("Audio could not be saved. Retry your download.");
+  } catch (e) {
+    await FileSystem.deleteAsync(path, { idempotent: true });
+    throw e;
   }
-  return { ...track, localUri: path, downloaded_at: new Date().toISOString() };
+  return {
+    ...track,
+    localUri: path,
+    localThumbnail: await cacheThumbnail(track),
+    downloaded_at: new Date().toISOString(),
+  };
+}
+/** Best effort: cover art is cached so library artwork renders offline; failure never blocks the audio. */
+async function cacheThumbnail(track: Track) {
+  if (!/^https:\/\//.test(track.thumbnail || "")) return undefined;
+  const dir = FileSystem.documentDirectory + "thumbnails/";
+  const path = dir + track.id + ".jpg";
+  try {
+    await FileSystem.makeDirectoryAsync(dir, { intermediates: true });
+    const r = await FileSystem.downloadAsync(track.thumbnail, path);
+    const info = await FileSystem.getInfoAsync(path);
+    if (r.status === 200 && info.exists && info.size) return path;
+    await FileSystem.deleteAsync(path, { idempotent: true });
+  } catch {
+    await FileSystem.deleteAsync(path, { idempotent: true }).catch(() => {});
+  }
+  return undefined;
 }
 export async function deleteAudio(track: Track) {
   if (Platform.OS === "web") {
@@ -93,6 +123,10 @@ export async function deleteAudio(track: Track) {
       tx.onerror = () => reject(tx.error);
     });
     db.close();
-  } else if (track.localUri)
-    await FileSystem.deleteAsync(track.localUri, { idempotent: true });
+  } else {
+    if (track.localUri)
+      await FileSystem.deleteAsync(track.localUri, { idempotent: true });
+    if (track.localThumbnail)
+      await FileSystem.deleteAsync(track.localThumbnail, { idempotent: true });
+  }
 }

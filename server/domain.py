@@ -1,8 +1,31 @@
 """Pure metadata, classification and duplicate rules, independent of transport."""
 import re
 import unicodedata
+from urllib.parse import parse_qs, urlparse
 
 VIDEO_ID = re.compile(r'^[A-Za-z0-9_-]{11}$')
+
+YOUTUBE_HOSTS = {'youtube.com','www.youtube.com','m.youtube.com','music.youtube.com'}
+
+def parse_video_url(value):
+    """Return the video ID of a supported YouTube URL, or None. Never trusts the host suffix."""
+    try:
+        url = urlparse(value)
+        host = (url.hostname or '').lower()
+    except ValueError:
+        return None
+    if url.scheme not in ('http','https') or url.username or url.password:
+        return None
+    if host == 'youtu.be':
+        candidate = url.path[1:]
+    elif host in YOUTUBE_HOSTS:
+        candidate = (parse_qs(url.query).get('v') or [''])[0]
+        if not candidate:
+            match = re.fullmatch(r'/(?:shorts|embed)/([^/]+)', url.path)
+            candidate = match.group(1) if match else ''
+    else:
+        return None
+    return candidate if VIDEO_ID.fullmatch(candidate) else None
 
 def normalize(value):
     value = unicodedata.normalize('NFKD', value).casefold()

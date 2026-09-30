@@ -15,7 +15,7 @@ from fastapi.middleware.cors import CORSMiddleware
 from fastapi.responses import FileResponse
 from pydantic import BaseModel, Field
 from .database import Database
-from .domain import VIDEO_ID, DuplicateDetectionService
+from .domain import VIDEO_ID, DuplicateDetectionService, parse_video_url
 from .downloads import QueueService
 from .youtube import YouTubeService
 
@@ -128,6 +128,9 @@ async def playlist(playlist_id:str,page:str='',user=Depends(session)):
 
 class DownloadRequest(BaseModel):
     video_id:str = Field(pattern=r'^[A-Za-z0-9_-]{11}$')
+    # Optional and never used to fetch anything: it is only checked against video_id, and yt-dlp always gets a URL the server builds.
+    url:str|None = Field(default=None,max_length=300)
+    playlist_id:str|None = Field(default=None,pattern=r'^[\w-]{1,64}$')
     format:Literal['mp3','m4a','opus']='mp3'
     quality:Literal[128,192,256,320]=320
     permission_confirmed:bool=False
@@ -135,6 +138,8 @@ class DownloadRequest(BaseModel):
 
 @app.post('/downloads')
 async def download(body:DownloadRequest,user=Depends(session)):
+    if body.url is not None and parse_video_url(body.url) != body.video_id:
+        raise HTTPException(400,'Only YouTube links that match the requested video are supported.')
     if not body.permission_confirmed or not authorized(body.video_id):
         raise HTTPException(403,'Only content you have permission to download and that is approved by the server can be saved.')
     track = await youtube.getMusicMetadata(body.video_id)
@@ -142,7 +147,7 @@ async def download(body:DownloadRequest,user=Depends(session)):
     duplicate = DuplicateDetectionService.check(track,db.tracks(user))
     if duplicate == 'ALREADY DOWNLOADED': return {'duplicate':duplicate,'track':track}
     if duplicate == 'POSSIBLE DUPLICATE' and not body.allow_duplicate: return {'duplicate':duplicate,'track':track}
-    job = {'id':uuid.uuid4().hex,'user_id':user,'track':track,'state':'QUEUED','progress':0,'format':body.format,'quality':body.quality,'allow_duplicate':body.allow_duplicate}
+    job = {'id':uuid.uuid4().hex,'user_id':user,'track':track,'state':'QUEUED','progress':0,'format':body.format,'quality':body.quality,'allow_duplicate':body.allow_duplicate,'playlist_id':body.playlist_id}
     try: db.save_job(job)
     except sqlite3.IntegrityError:
         return next(j for j in db.jobs(user) if j['track']['id']==body.video_id and j['state'] in ('QUEUED','ANALYZING','DOWNLOADING','PROCESSING'))
@@ -150,6 +155,12 @@ async def download(body:DownloadRequest,user=Depends(session)):
 
 @app.get('/downloads')
 def jobs(user=Depends(session)): return {'items':db.jobs(user),'paused':db.paused(user)}
+
+@app.get('/downloads/{download_id}')
+def download_status(download_id:str,user=Depends(session)):
+    job = next((j for j in db.jobs(user) if j['id']==download_id),None)
+    if not job: raise HTTPException(404,'Download not found.')
+    return {**{k:v for k,v in job.items() if k!='user_id'},'status':job['state'].lower(),'title':job['track']['title']}
 
 @app.post('/downloads/queue/{action}')
 def queue_action(action:str,user=Depends(session)):
@@ -175,6 +186,7 @@ async def job_action(job_id:str,action:str,user=Depends(session)):
         job.update(state='QUEUED',progress=0,error=None)
         try: db.save_job(job)
         except sqlite3.IntegrityError: raise HTTPException(409,'This track is already queued.')
+    elif action=='remove' and job['state'] in ('COMPLETED','SKIPPED','FAILED','CANCELLED'): db.delete_job(user,job_id)
     else: raise HTTPException(400,'This action is not available for this download.')
     return {'ok':True}
 

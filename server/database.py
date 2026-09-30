@@ -40,8 +40,15 @@ class Database:
 
     def save_job(self, job):
         with self.connect() as db:
+            previous = db.execute('SELECT state FROM downloads WHERE id=?', (job['id'],)).fetchone()
             db.execute('INSERT INTO downloads VALUES(?,?,?,?,?) ON CONFLICT(id) DO UPDATE SET state=excluded.state,data=excluded.data', (job['id'],job['user_id'],job['track']['id'],job['state'],json.dumps(job)))
-            db.execute('INSERT INTO download_history(job_id,state) VALUES(?,?)', (job['id'],job['state']))
+            # Progress ticks re-save the job many times a second; history only records state changes.
+            if previous is None or previous['state'] != job['state']:
+                db.execute('INSERT INTO download_history(job_id,state) VALUES(?,?)', (job['id'],job['state']))
+
+    def delete_job(self, user, job_id):
+        with self.connect() as db:
+            db.execute('DELETE FROM downloads WHERE id=? AND user_id=?', (job_id,user))
 
     def save_track(self, user, track):
         with self.connect() as db:

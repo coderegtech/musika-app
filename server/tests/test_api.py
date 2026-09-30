@@ -50,3 +50,34 @@ class ApiTests(unittest.TestCase):
         with patch.object(main.youtube,'getMusicMetadata',new=AsyncMock(return_value=track)):
             response = self.client.post('/downloads',headers=self.headers,json={'video_id':'abcdefghijk','permission_confirmed':True})
         self.assertEqual(response.status_code,200)
+
+    def test_download_url_must_match_video_id(self):
+        for url in ['https://evil.test/watch?v=abcdefghijk','https://www.youtube.com/watch?v=zzzzzzzzzzz','file:///etc/passwd']:
+            response = self.client.post('/downloads',headers=self.headers,json={'video_id':'abcdefghijk','url':url,'permission_confirmed':True})
+            self.assertEqual(response.status_code,400,url)
+    def test_playlist_id_is_validated(self):
+        response = self.client.post('/downloads',headers=self.headers,json={'video_id':'abcdefghijk','playlist_id':'../../etc; rm'})
+        self.assertEqual(response.status_code,422)
+    def test_matching_url_and_playlist_are_accepted_and_reported(self):
+        track = {'id':'abcdefghijk','source':'youtube','title':'Song','artist':'Artist','duration':200,'thumbnail':'','classification':'MUSIC'}
+        self.db.add_authorized('abcdefghijk','alice')
+        with patch.object(main.youtube,'getMusicMetadata',new=AsyncMock(return_value=track)):
+            response = self.client.post('/downloads',headers=self.headers,json={'video_id':'abcdefghijk','url':'https://youtu.be/abcdefghijk','playlist_id':'local-road_trip','permission_confirmed':True})
+        self.assertEqual(response.status_code,200);self.assertEqual(response.json()['playlist_id'],'local-road_trip')
+        status = self.client.get('/downloads/'+response.json()['id'],headers=self.headers).json()
+        self.assertEqual(status['status'],'queued');self.assertEqual(status['title'],'Song');self.assertNotIn('user_id',status)
+    def test_status_is_user_scoped(self):
+        track = {'id':'abcdefghijk','source':'youtube','title':'Song','artist':'Artist','duration':200,'thumbnail':''}
+        self.db.save_job({'id':'job1','user_id':'alice','track':track,'state':'DOWNLOADING','progress':40,'format':'mp3','quality':320})
+        self.assertEqual(self.client.get('/downloads/job1',headers=self.headers).json()['progress'],40)
+        self.assertEqual(self.client.get('/downloads/job1',headers=self.bob_headers).status_code,404)
+        self.assertEqual(self.client.get('/downloads/job1').status_code,401)
+    def test_remove_only_finished_jobs(self):
+        track = {'id':'abcdefghijk','source':'youtube','title':'Song','artist':'Artist','duration':200,'thumbnail':''}
+        base = {'user_id':'alice','track':track,'progress':0,'format':'mp3','quality':320}
+        self.db.save_job({**base,'id':'active','state':'DOWNLOADING'})
+        self.assertEqual(self.client.post('/downloads/active/remove',headers=self.headers).status_code,400)
+        self.db.save_job({**base,'id':'active','state':'COMPLETED'})
+        self.assertEqual(self.client.post('/downloads/active/remove',headers=self.bob_headers).status_code,404)
+        self.assertEqual(self.client.post('/downloads/active/remove',headers=self.headers).status_code,200)
+        self.assertEqual(self.db.jobs('alice'),[])

@@ -14,7 +14,7 @@ import {
 } from "expo-audio";
 import { useStore } from "../store";
 import { audioUri } from "../services/media";
-import { seconds } from "../models";
+import { Track, seconds, artwork } from "../models";
 import {
   Button,
   Cover,
@@ -137,7 +137,7 @@ export default function Player() {
           completed.current = false;
           player.play();
         });
-      } else if (s.library.length > 1) s.next();
+      } else if ((s.queueIds?.length ?? s.library.length) > 1) s.next();
       else s.setPlaying(false);
     } else if (!status.didJustFinish) completed.current = false;
   }, [status.didJustFinish]);
@@ -224,7 +224,7 @@ export default function Player() {
           }}
         >
           {t ? (
-            <Cover uri={t.thumbnail} size={compact ? 45 : 52} />
+            <Cover uri={artwork(t)} size={compact ? 45 : 52} />
           ) : (
             <Icon name="disc" size={36} />
           )}
@@ -368,13 +368,19 @@ export default function Player() {
             <ScrollView>
               {showQueue ? (
                 <>
-                  {s.library.map((track, i) => (
+                  {(s.queueIds
+                    ? s.queueIds
+                        .map((id) => s.library.find((x) => x.id === id))
+                        .filter((x): x is Track => !!x)
+                    : s.library
+                  ).map((track, i) => (
                     <TrackRow
                       key={track.id}
                       track={track}
                       index={i}
+                      menu={false}
                       onPress={() => {
-                        s.play(track);
+                        s.play(track, true);
                         setShowQueue(false);
                       }}
                     />
@@ -384,7 +390,7 @@ export default function Player() {
                 <>
                   {t && (
                     <Cover
-                      uri={t.thumbnail}
+                      uri={artwork(t)}
                       size={300}
                       style={{
                         width: "100%",

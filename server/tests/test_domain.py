@@ -1,5 +1,5 @@
 import unittest
-from server.domain import MusicContentClassifier,MetadataService,DuplicateDetectionService,normalize,duration_seconds,VIDEO_ID
+from server.domain import MusicContentClassifier,MetadataService,DuplicateDetectionService,normalize,duration_seconds,VIDEO_ID,parse_video_url
 
 def video(**changes):
     v={'id':'abcdefghijk','snippet':{'title':'Juniper - After the Rain (Official Audio)','channelTitle':'Juniper - Topic','description':'Album: A New Day','categoryId':'10','thumbnails':{'high':{'url':'https://i.ytimg.com/vi/abcdefghijk/hqdefault.jpg'}}},'contentDetails':{'duration':'PT3M42S'}}
@@ -29,5 +29,11 @@ class DomainTests(unittest.TestCase):
         for value in ['https://youtube.com/watch?v=abcdefghijk','abc; rm -rf /','--exec=abc','../abcdefghijk']:
             self.assertIsNone(VIDEO_ID.fullmatch(value))
     def test_iso_duration(self): self.assertEqual(duration_seconds('PT1H2M3S'),3723)
+    def test_supported_urls_yield_the_video_id(self):
+        for url in ['https://www.youtube.com/watch?v=abcdefghijk','https://music.youtube.com/watch?v=abcdefghijk&list=x','https://youtu.be/abcdefghijk?t=4','https://www.youtube.com/shorts/abcdefghijk']:
+            self.assertEqual(parse_video_url(url),'abcdefghijk',url)
+    def test_unsafe_urls_rejected(self):
+        for url in ['https://evil.test/watch?v=abcdefghijk','https://youtube.com.evil.test/watch?v=abcdefghijk','https://user:pw@youtube.com/watch?v=abcdefghijk','file:///etc/passwd','ftp://youtube.com/watch?v=abcdefghijk','https://youtu.be/short','https://www.youtube.com/watch?v=abc;rm -rf','javascript:alert(1)','']:
+            self.assertIsNone(parse_video_url(url),url)
 
 if __name__=='__main__': unittest.main()
