@@ -113,9 +113,6 @@ class QueueService:
                 job['error'] = duplicate
                 await transition('SKIPPED',100)
                 return
-            allowed = job['track']['id'] in set(filter(None,os.getenv('AUTHORIZED_VIDEO_IDS','').split(','))) or self.db.is_authorized(job['track']['id'])
-            if not allowed:
-                raise RuntimeError('This content is not in the server’s authorized download catalog.')
             track = await self.engine.download(job,transition,lambda args:self.run_process(job['id'],args))
             final_duplicate = DuplicateDetectionService.check(track,self.db.tracks(job['user_id']))
             if final_duplicate == 'ALREADY DOWNLOADED' or (final_duplicate == 'POSSIBLE DUPLICATE' and not job.get('allow_duplicate')):

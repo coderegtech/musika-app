@@ -28,13 +28,11 @@ services:
       # Frontend (vercel.app) and API (onrender.com) are different sites.
       - key: COOKIE_SAMESITE
         value: none
+      - key: STREAM_SECRET
+        generateValue: true
       - key: FIREBASE_PROJECT_ID
         sync: false
       - key: YOUTUBE_API_KEY
         sync: false
       - key: MUSIKA_ORIGINS
-        sync: false
-      - key: ADMIN_EMAILS
-        sync: false
-      - key: AUTHORIZED_VIDEO_IDS
         sync: false

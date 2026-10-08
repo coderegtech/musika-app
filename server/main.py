@@ -12,11 +12,13 @@ from typing import Literal
 from dotenv import load_dotenv
 from fastapi import FastAPI, Depends, HTTPException, Request, Response
 from fastapi.middleware.cors import CORSMiddleware
-from fastapi.responses import FileResponse
+from fastapi.responses import FileResponse, StreamingResponse
 from pydantic import BaseModel, Field
+from starlette.background import BackgroundTask
 from .database import Database
 from .domain import VIDEO_ID, DuplicateDetectionService
 from .downloads import QueueService
+from .streams import StreamService
 from .youtube import YouTubeService
 
 load_dotenv(Path(__file__).parent/'.env')
@@ -24,6 +26,7 @@ ROOT = Path(__file__).parent/'data'
 db = Database(ROOT/'musika.db')
 youtube = YouTubeService()
 queue = QueueService(db,ROOT/'audio')
+streams = StreamService()
 
 @asynccontextmanager
 async def lifespan(app):
@@ -32,6 +35,7 @@ async def lifespan(app):
     worker.cancel()
     await queue.shutdown()
     await asyncio.gather(worker,return_exceptions=True)
+    await streams.close()
 
 app = FastAPI(title='Musika API',lifespan=lifespan)
 origins = os.getenv('MUSIKA_ORIGINS','http://localhost:8081').split(',')
@@ -59,15 +63,6 @@ def session(request:Request):
         row = conn.execute('SELECT * FROM sessions WHERE token_hash=? AND expires>?',(digest,time.time())).fetchone()
     if not row: raise HTTPException(401,'Your session expired. Sign in again.')
     return row['user_id']
-
-def admin(user=Depends(session)):
-    admins = {e.strip().lower() for e in os.getenv('ADMIN_EMAILS','').split(',') if e.strip()}
-    with db.connect() as conn: profile = json.loads(conn.execute('SELECT profile FROM users WHERE id=?',(user,)).fetchone()['profile'])
-    if profile.get('email','').lower() not in admins: raise HTTPException(403,'This account cannot manage the download catalog.')
-    return user
-
-def authorized(video_id):
-    return video_id in os.getenv('AUTHORIZED_VIDEO_IDS','').split(',') or db.is_authorized(video_id)
 
 def cookie_options():
     # 'none' is needed when the web app and API are on different sites (e.g. vercel.app + onrender.com);
@@ -145,13 +140,10 @@ class DownloadRequest(BaseModel):
     video_id:str = Field(pattern=r'^[A-Za-z0-9_-]{11}$')
     format:Literal['mp3','m4a','opus']='mp3'
     quality:Literal[128,192,256,320]=320
-    permission_confirmed:bool=False
     allow_duplicate:bool=False
 
 @app.post('/downloads')
 async def download(body:DownloadRequest,user=Depends(session)):
-    if not body.permission_confirmed or not authorized(body.video_id):
-        raise HTTPException(403,'Only content you have permission to download and that is approved by the server can be saved.')
     track = await youtube.getMusicMetadata(body.video_id)
     if track['classification']=='NOT_MUSIC': raise HTTPException(400,'This video is not classified as music.')
     duplicate = DuplicateDetectionService.check(track,db.tracks(user))
@@ -193,23 +185,6 @@ async def job_action(job_id:str,action:str,user=Depends(session)):
     else: raise HTTPException(400,'This action is not available for this download.')
     return {'ok':True}
 
-class AuthorizeVideo(BaseModel):
-    video_id:str = Field(pattern=r'^[A-Za-z0-9_-]{11}$')
-
-@app.get('/admin/authorized-videos')
-def list_authorized(user=Depends(admin)): return {'items':db.authorized_videos()}
-
-@app.post('/admin/authorized-videos')
-def add_authorized(body:AuthorizeVideo,user=Depends(admin)):
-    db.add_authorized(body.video_id,user)
-    return {'ok':True}
-
-@app.delete('/admin/authorized-videos/{video_id}')
-def remove_authorized(video_id:str,user=Depends(admin)):
-    if not VIDEO_ID.fullmatch(video_id): raise HTTPException(400,'Invalid YouTube video ID.')
-    db.remove_authorized(video_id)
-    return {'ok':True}
-
 @app.get('/library')
 def library(user=Depends(session)):
     return {'items':[{k:v for k,v in t.items() if k!='file_path'} for t in db.tracks(user)]}
@@ -222,3 +197,19 @@ def media(video_id:str,user=Depends(session)):
     if not path.is_relative_to((ROOT/'audio').resolve()): raise HTTPException(403,'Invalid file path.')
     return FileResponse(path,filename=path.name,media_type={'mp3':'audio/mpeg','m4a':'audio/mp4','opus':'audio/ogg'}[track['format']])
 
+@app.get('/stream/{video_id}')
+def stream_link(video_id:str,user=Depends(session)):
+    # Media players can't attach the session header, so they get a short-lived signed URL instead.
+    if not VIDEO_ID.fullmatch(video_id): raise HTTPException(400,'Invalid YouTube video ID.')
+    return {'url':streams.link(video_id)}
+
+@app.get('/stream/{video_id}/audio')
+async def stream_audio(video_id:str,exp:int,sig:str,request:Request):
+    if not VIDEO_ID.fullmatch(video_id) or not streams.verify(video_id,exp,sig): raise HTTPException(403,'This stream link is invalid or expired.')
+    try: upstream,start,end,info = await streams.open(video_id,request.headers.get('range'))
+    except (RuntimeError,ValueError,KeyError) as error: raise HTTPException(502,f'This track cannot be streamed right now. {error}')
+    if upstream is None: return Response(status_code=416,headers={'Content-Range':f"bytes */{info['size']}"})
+    headers = {'Accept-Ranges':'bytes','Cache-Control':'private, max-age=3600'}
+    for name in ('content-length','content-range'):
+        if name in upstream.headers: headers[name] = upstream.headers[name]
+    return StreamingResponse(upstream.aiter_raw(),status_code=upstream.status_code,media_type=info['type'],headers=headers,background=BackgroundTask(upstream.aclose))

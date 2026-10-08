@@ -34,11 +34,13 @@ type State = {
   toast: string | null;
   notify: (message: string) => void;
   current: Track | null;
+  /** What next/previous step through; empty means the library. */
+  queue: Track[];
   playing: boolean;
   shuffle: boolean;
   repeat: boolean;
   setPlaying: (value: boolean) => void;
-  play: (t: Track) => void;
+  play: (t: Track, queue?: Track[]) => void;
   next: (delta?: number) => void;
   toggleShuffle: () => void;
   toggleRepeat: () => void;
@@ -46,11 +48,7 @@ type State = {
   addPlaylist: (title: string, ids: string[]) => void;
   removePlaylist: (id: string) => void;
   remove: (track: Track) => Promise<void>;
-  enqueue: (
-    tracks: Track[],
-    permission: boolean,
-    allowDuplicate?: boolean,
-  ) => Promise<void>;
+  enqueue: (tracks: Track[], allowDuplicate?: boolean) => Promise<void>;
   queueAction: (action: string, id?: string) => Promise<void>;
   updateJob: (id: string, changes: Partial<Download>) => void;
   complete: (track: Track) => Promise<void>;
@@ -83,28 +81,37 @@ export const useStore = create<State>()(
         toastTimer = setTimeout(() => set({ toast: null }), 4500);
       },
       current: null,
+      queue: [],
       playing: false,
       shuffle: false,
       repeat: false,
       setPlaying: (playing) => set({ playing }),
-      play: (track) => {
+      play: (track, queue) => {
         const saved = get().library.find((t) => t.id === track.id);
-        if (!saved) {
+        // Tracks that aren't downloaded stream from the server instead.
+        if (!saved && track.source !== "youtube") {
           get().notify("Download this track to listen offline.");
           return;
         }
-        set({ current: saved, playing: true });
+        set({
+          current: saved || track,
+          queue: queue?.length ? queue : saved ? [] : [track],
+          playing: true,
+        });
       },
       next: (delta = 1) => {
-        const { library, current, shuffle } = get();
-        if (!library.length) return;
-        const index = library.findIndex((t) => t.id === current?.id);
+        const { library, queue, current, shuffle } = get();
+        const list = queue.length ? queue : library;
+        if (!list.length) return;
+        const index = list.findIndex((t) => t.id === current?.id);
         const next =
-          shuffle && library.length > 1
-            ? (index + 1 + Math.floor(Math.random() * (library.length - 1))) %
-              library.length
-            : (index + delta + library.length) % library.length;
-        set({ current: library[next], playing: true });
+          shuffle && list.length > 1
+            ? (index + 1 + Math.floor(Math.random() * (list.length - 1))) %
+              list.length
+            : (index + delta + list.length) % list.length;
+        // Prefer the downloaded copy so playback stays offline when it can.
+        const track = library.find((t) => t.id === list[next].id) || list[next];
+        set({ current: track, playing: true });
       },
       toggleShuffle: () => set({ shuffle: !get().shuffle }),
       toggleRepeat: () => set({ repeat: !get().repeat }),
@@ -161,13 +168,7 @@ export const useStore = create<State>()(
           removedIds: get().removedIds.filter((id) => id !== track.id),
         });
       },
-      enqueue: async (tracks, permission, allowDuplicate = false) => {
-        if (!permission) {
-          get().notify(
-            "Confirm that you have permission to download this music.",
-          );
-          return;
-        }
+      enqueue: async (tracks, allowDuplicate = false) => {
         let added = 0;
         for (const track of tracks) {
           const status = duplicate(track, get().library);
@@ -206,7 +207,6 @@ export const useStore = create<State>()(
                   video_id: track.id,
                   format: get().format,
                   quality: get().quality,
-                  permission_confirmed: permission,
                   allow_duplicate: allowDuplicate,
                 }),
               },

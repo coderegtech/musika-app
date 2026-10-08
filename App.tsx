@@ -119,7 +119,7 @@ function AppContent() {
     [selected, setSelected] = useState<string[]>([]),
     [playlistLoading, setPlaylistLoading] = useState(false),
     [playlistError, setPlaylistError] = useState("");
-  const [permission, setPermission] = useState(DEMO),
+  const [detailsList, setDetailsList] = useState<Track[]>([]),
     [busy, setBusy] = useState(false),
     [allowDuplicate, setAllowDuplicate] = useState(false);
   const [paste, setPaste] = useState(false),
@@ -250,17 +250,23 @@ function AppContent() {
       if (version === searchVersion.current) setLoading(false);
     }
   }
-  function openDetails(track: Track) {
+  // `list` is where the track was opened from; Play now queues it so
+  // next/previous keep going through the same results.
+  function openDetails(track: Track, list: Track[] = []) {
     setDetails(track);
-    setPermission(DEMO);
+    setDetailsList(list);
     setAllowDuplicate(false);
+  }
+  const canStream = (track: Track) => !DEMO && track.source === "youtube";
+  function playNow(track: Track) {
+    s.play(track, detailsList.filter(canStream));
+    setDetails(null);
   }
   async function openPlaylist(p: Playlist, page?: string) {
     if (!page) {
       setPlaylist(p);
       setPlaylistTracks([]);
       setSelected([]);
-      setPermission(DEMO);
     }
     setPlaylistError("");
     setPlaylistLoading(true);
@@ -387,39 +393,6 @@ function AppContent() {
           </View>
         </LinearGradient>
       </ImageBackground>
-    </Pressable>
-  );
-  const downloadPermission = (
-    <Pressable
-      accessibilityRole="checkbox"
-      accessibilityState={{ checked: permission }}
-      onPress={() => setPermission(!permission)}
-      style={{
-        flexDirection: "row",
-        alignItems: "center",
-        gap: 12,
-        paddingVertical: 14,
-      }}
-    >
-      <View
-        style={{
-          width: 21,
-          height: 21,
-          borderRadius: 5,
-          borderWidth: 1,
-          borderColor: c.muted,
-          backgroundColor: permission ? c.lime : c.surface,
-          alignItems: "center",
-          justifyContent: "center",
-        }}
-      >
-        {permission && <Icon name="check" size={14} color="#263E32" />}
-      </View>
-      <Label muted style={{ fontSize: 12, flex: 1, lineHeight: 19 }}>
-        {DEMO
-          ? "This original demo audio is available to save."
-          : "I own this content or have permission to download it."}
-      </Label>
     </Pressable>
   );
   if (!hydrated || !authChecked)
@@ -1008,7 +981,7 @@ function AppContent() {
                           key={t.id}
                           track={t}
                           width={cardWidth}
-                          onPress={() => openDetails(t)}
+                          onPress={() => openDetails(t, catalog)}
                         />
                       ))}
                   </View>
@@ -1100,7 +1073,7 @@ function AppContent() {
                   <Label muted style={{ fontSize: 10 }}>
                     {DEMO
                       ? "A taste of Musika · Fictional artists, original demo audio."
-                      : "Discovery powered by YouTube · Your downloads, your permission."}
+                      : "Discovery powered by YouTube · Stream the video or save it as MP3."}
                   </Label>
                 </View>
               </>
@@ -1181,7 +1154,14 @@ function AppContent() {
                               key={t.id}
                               track={t}
                               width={cardWidth}
-                              onPress={() => openDetails(t)}
+                              onPress={() =>
+                                openDetails(
+                                  t,
+                                  results.filter(
+                                    (r): r is Track => "source" in r,
+                                  ),
+                                )
+                              }
                             />
                           ) : (
                             <View
@@ -1318,7 +1298,7 @@ function AppContent() {
                               key={t.id}
                               width={cardWidth}
                               track={t}
-                              onPress={() => openDetails(t)}
+                              onPress={() => openDetails(t, catalog)}
                             />
                           ))}
                         </View>
@@ -1973,16 +1953,49 @@ function AppContent() {
       >
         {details && (
           <>
-            <Cover
-              uri={details.thumbnail}
-              size={300}
-              style={{
-                width: "100%",
-                height: undefined,
-                aspectRatio: 1.35,
-                borderRadius: 13,
-              }}
-            />
+            <Pressable
+              accessibilityRole="button"
+              accessibilityLabel="Play now"
+              disabled={!canStream(details)}
+              onPress={() => playNow(details)}
+            >
+              <Cover
+                uri={details.thumbnail}
+                size={300}
+                style={{
+                  width: "100%",
+                  height: undefined,
+                  aspectRatio: 1.35,
+                  borderRadius: 13,
+                }}
+              />
+              {canStream(details) && (
+                <View
+                  style={{
+                    position: "absolute",
+                    top: 0,
+                    left: 0,
+                    right: 0,
+                    bottom: 0,
+                    alignItems: "center",
+                    justifyContent: "center",
+                  }}
+                >
+                  <View
+                    style={{
+                      width: 62,
+                      height: 62,
+                      borderRadius: 31,
+                      backgroundColor: c.lime,
+                      alignItems: "center",
+                      justifyContent: "center",
+                    }}
+                  >
+                    <Icon name="play" size={26} color="#243B30" />
+                  </View>
+                </View>
+              )}
+            </Pressable>
             <View
               style={{
                 flexDirection: "row",
@@ -2074,7 +2087,14 @@ function AppContent() {
               </>
             ) : (
               <>
-                {downloadPermission}
+                {canStream(details) && (
+                  <Button
+                    title="Play now"
+                    icon="play"
+                    onPress={() => playNow(details)}
+                    style={{ marginBottom: 10 }}
+                  />
+                )}
                 {duplicate(details, s.library) === "POSSIBLE DUPLICATE" && (
                   <Pressable
                     accessibilityRole="checkbox"
@@ -2089,13 +2109,17 @@ function AppContent() {
                   </Pressable>
                 )}
                 <Button
+                  secondary={canStream(details)}
                   title={
-                    busy ? "Adding to your queue…" : "Download to your library"
+                    busy
+                      ? "Adding to your queue…"
+                      : DEMO
+                        ? "Download to your library"
+                        : `Download ${s.format.toUpperCase()} to this device`
                   }
                   icon="download"
                   disabled={
                     busy ||
-                    !permission ||
                     (duplicate(details, s.library) === "POSSIBLE DUPLICATE" &&
                       !allowDuplicate)
                   }
@@ -2103,7 +2127,7 @@ function AppContent() {
                     void run(async () => {
                       setBusy(true);
                       try {
-                        await s.enqueue([details], permission, allowDuplicate);
+                        await s.enqueue([details], allowDuplicate);
                         setDetails(null);
                       } finally {
                         setBusy(false);
@@ -2117,7 +2141,7 @@ function AppContent() {
                 >
                   {DEMO
                     ? "Bundled original audio · WAV"
-                    : `${s.format.toUpperCase()} · ${s.quality} kbps · Saved for offline listening`}
+                    : `Converted to ${s.format.toUpperCase()} · ${s.quality} kbps · Saved on this device for offline listening`}
                 </Label>
               </>
             )}
@@ -2228,18 +2252,17 @@ function AppContent() {
                 style={{ marginTop: 15 }}
               />
             )}
-            {downloadPermission}
             <Button
               title={`Download ${selected.length} ${selected.length === 1 ? "track" : "tracks"}`}
               icon="download"
-              disabled={!selected.length || !permission || busy}
+              disabled={!selected.length || busy}
+              style={{ marginTop: 18 }}
               onPress={() =>
                 void run(async () => {
                   setBusy(true);
                   try {
                     await s.enqueue(
                       playlistTracks.filter((t) => selected.includes(t.id)),
-                      permission,
                     );
                     setPlaylist(null);
                   } finally {

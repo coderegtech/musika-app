@@ -14,7 +14,7 @@ import {
 } from "expo-audio";
 import { useStore } from "../store";
 import { audioUri } from "../services/media";
-import { seconds } from "../models";
+import { seconds, Track } from "../models";
 import {
   Button,
   Cover,
@@ -82,6 +82,7 @@ export default function Player() {
   const player = useAudioPlayer(null, { updateInterval: 250 });
   const status = useAudioPlayerStatus(player);
   const current = s.current;
+  const upNext = s.queue.length ? s.queue : s.library;
   const uriRef = useRef<string | null>(null);
   const completed = useRef(false);
   useEffect(() => {
@@ -110,6 +111,7 @@ export default function Player() {
         player.replace({ uri });
         completed.current = false;
         setReady(true);
+        showNowPlaying(current);
       })
       .catch((e) => {
         s.notify(e.message);
@@ -137,10 +139,35 @@ export default function Player() {
           completed.current = false;
           player.play();
         });
-      } else if (s.library.length > 1) s.next();
+      } else if (upNext.length > 1) s.next();
       else s.setPlaying(false);
     } else if (!status.didJustFinish) completed.current = false;
   }, [status.didJustFinish]);
+  // The lock screen / media notification is also what keeps Android playing
+  // in the background; on web the Media Session API fills the same role.
+  function showNowPlaying(track: Track) {
+    const metadata = {
+      title: track.title,
+      artist: track.artist,
+      artworkUrl: track.thumbnail,
+    };
+    if (Platform.OS !== "web") {
+      player.setActiveForLockScreen(true, metadata);
+      return;
+    }
+    if (!("mediaSession" in navigator)) return;
+    navigator.mediaSession.metadata = new MediaMetadata({
+      title: track.title,
+      artist: track.artist,
+      artwork: track.thumbnail ? [{ src: track.thumbnail }] : [],
+    });
+    navigator.mediaSession.setActionHandler("nexttrack", () =>
+      useStore.getState().next(1),
+    );
+    navigator.mediaSession.setActionHandler("previoustrack", () =>
+      useStore.getState().next(-1),
+    );
+  }
   const toggle = () => {
     if (current) s.setPlaying(!s.playing);
     else if (s.library[0]) s.play(s.library[0]);
@@ -368,13 +395,13 @@ export default function Player() {
             <ScrollView>
               {showQueue ? (
                 <>
-                  {s.library.map((track, i) => (
+                  {upNext.map((track, i) => (
                     <TrackRow
                       key={track.id}
                       track={track}
                       index={i}
                       onPress={() => {
-                        s.play(track);
+                        s.play(track, s.queue);
                         setShowQueue(false);
                       }}
                     />
