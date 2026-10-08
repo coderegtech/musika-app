@@ -4,6 +4,26 @@ import { signOut as fbSignOut } from "firebase/auth";
 import { API, User } from "../models";
 import { firebaseAuth, firebaseConfigured } from "./firebase";
 let token: string | null = null;
+const KEY = "musika.session";
+// The web app and API are usually on different sites (vercel.app and
+// onrender.com), where browsers that block third-party cookies drop the
+// session cookie. So web sends the bearer token too, the same as native; the
+// HttpOnly cookie remains a fallback.
+const webStore = {
+  get: () => {
+    try {
+      return localStorage.getItem(KEY);
+    } catch {
+      return null;
+    }
+  },
+  set: (value: string | null) => {
+    try {
+      if (value) localStorage.setItem(KEY, value);
+      else localStorage.removeItem(KEY);
+    } catch {}
+  },
+};
 const expiredListeners = new Set<() => void>();
 export function onSessionExpired(callback: () => void) {
   expiredListeners.add(callback);
@@ -17,8 +37,10 @@ export function sessionExpired() {
 export const authHeaders = () =>
   token ? { Authorization: `Bearer ${token}` } : { Authorization: "" };
 export async function restoreSession(): Promise<User | null> {
-  if (Platform.OS !== "web")
-    token = await SecureStore.getItemAsync("musika.session");
+  token =
+    Platform.OS === "web"
+      ? webStore.get()
+      : await SecureStore.getItemAsync(KEY);
   const result = await fetch(`${API}/auth/me`, {
     headers: authHeaders(),
     credentials: "include",
@@ -33,8 +55,8 @@ export async function restoreSession(): Promise<User | null> {
 }
 export async function clearSession() {
   token = null;
-  if (Platform.OS !== "web")
-    await SecureStore.deleteItemAsync("musika.session");
+  if (Platform.OS === "web") webStore.set(null);
+  else await SecureStore.deleteItemAsync(KEY);
 }
 export async function exchangeFirebase(idToken: string): Promise<User> {
   const result = await fetch(`${API}/auth/firebase`, {
@@ -45,8 +67,9 @@ export async function exchangeFirebase(idToken: string): Promise<User> {
   });
   const body = await result.json();
   if (!result.ok) throw new Error(body.detail || "Google sign-in failed.");
-  token = Platform.OS === "web" ? null : body.token;
-  if (token) await SecureStore.setItemAsync("musika.session", token);
+  token = body.token;
+  if (Platform.OS === "web") webStore.set(token);
+  else if (token) await SecureStore.setItemAsync(KEY, token);
   return body.user;
 }
 export async function signOut() {
