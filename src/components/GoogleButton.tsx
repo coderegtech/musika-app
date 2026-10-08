@@ -1,9 +1,5 @@
 import React from "react";
-import { Pressable, Text } from "react-native";
-import {
-  GoogleSignin,
-  isSuccessResponse,
-} from "@react-native-google-signin/google-signin";
+import { Pressable, Text, TurboModuleRegistry } from "react-native";
 import { GoogleAuthProvider, signInWithCredential } from "firebase/auth";
 import { exchangeFirebase } from "../services/auth";
 import { firebaseAuth } from "../services/firebase";
@@ -33,6 +29,14 @@ export default function GoogleButton({
             throw new Error(
               "Add your Firebase web client ID to enable sign-in.",
             );
+          // Expo Go doesn't ship this native module; importing it eagerly
+          // crashed the whole app at startup there.
+          if (!TurboModuleRegistry.get("RNGoogleSignin"))
+            throw new Error(
+              "Google sign-in needs a Musika development build. Expo Go can't run it.",
+            );
+          const { GoogleSignin, isSuccessResponse } =
+            require("@react-native-google-signin/google-signin") as typeof import("@react-native-google-signin/google-signin");
           GoogleSignin.configure({
             webClientId: process.env.EXPO_PUBLIC_GOOGLE_WEB_CLIENT_ID,
             iosClientId: process.env.EXPO_PUBLIC_GOOGLE_IOS_CLIENT_ID,
