@@ -44,6 +44,11 @@ class ApiTests(unittest.TestCase):
     def test_cookie_csrf_origin_rejected(self):self.assertEqual(self.client.post('/auth/logout',headers={**self.headers,'Origin':'https://attacker.example'}).status_code,403)
     def test_user_cannot_read_other_jobs(self):self.assertEqual(self.client.post('/downloads/other-user-job/cancel',headers=self.headers).status_code,404)
     def test_file_requires_ownership(self):self.assertEqual(self.client.get('/files/abcdefghijk',headers=self.headers).status_code,404)
+    def test_bulk_retry_with_repeated_failures_of_one_video(self):
+        track={'id':'abcdefghijk','source':'youtube','title':'Song','artist':'Artist','duration':200,'thumbnail':''}
+        for i in range(2): self.db.save_job({'id':f'failed{i}','user_id':'alice','track':track,'state':'FAILED','progress':0,'format':'mp3','quality':320})
+        self.assertEqual(self.client.post('/downloads/queue/retry',headers=self.headers).status_code,200)
+        self.assertEqual(sorted(j['state'] for j in self.db.jobs('alice')),['FAILED','QUEUED'])
     def test_any_music_video_can_be_queued(self):
         track = {'id':'abcdefghijk','source':'youtube','title':'Song','artist':'Artist','duration':200,'thumbnail':'','classification':'MUSIC'}
         with patch.object(main.youtube,'getMusicMetadata',new=AsyncMock(return_value=track)):

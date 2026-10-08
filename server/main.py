@@ -17,7 +17,7 @@ from pydantic import BaseModel, Field
 from starlette.background import BackgroundTask
 from .database import Database
 from .domain import VIDEO_ID, DuplicateDetectionService
-from .downloads import QueueService
+from .downloads import QueueService, log
 from .streams import StreamService
 from .youtube import YouTubeService
 
@@ -166,7 +166,11 @@ def queue_action(action:str,user=Depends(session)):
         with db.connect() as conn: conn.execute("DELETE FROM downloads WHERE user_id=? AND state IN ('COMPLETED','SKIPPED','CANCELLED')",(user,))
     elif action=='retry':
         for job in db.jobs(user):
-            if job['state']=='FAILED': job.update(state='QUEUED',progress=0,error=None); db.save_job(job)
+            if job['state']!='FAILED': continue
+            job.update(state='QUEUED',progress=0,error=None)
+            # The same video can have several failed jobs, but only one may be active.
+            try: db.save_job(job)
+            except sqlite3.IntegrityError: pass
     else: raise HTTPException(400,'Unknown queue action.')
     return {'ok':True}
 
@@ -207,7 +211,9 @@ def stream_link(video_id:str,user=Depends(session)):
 async def stream_audio(video_id:str,exp:int,sig:str,request:Request):
     if not VIDEO_ID.fullmatch(video_id) or not streams.verify(video_id,exp,sig): raise HTTPException(403,'This stream link is invalid or expired.')
     try: upstream,start,end,info = await streams.open(video_id,request.headers.get('range'))
-    except (RuntimeError,ValueError,KeyError) as error: raise HTTPException(502,f'This track cannot be streamed right now. {error}')
+    except (RuntimeError,ValueError,KeyError) as error:
+        log.warning('stream %s failed: %s',video_id,error)
+        raise HTTPException(502,str(error) if isinstance(error,RuntimeError) else 'This track cannot be streamed right now.')
     if upstream is None: return Response(status_code=416,headers={'Content-Range':f"bytes */{info['size']}"})
     headers = {'Accept-Ranges':'bytes','Cache-Control':'private, max-age=3600'}
     for name in ('content-length','content-range'):

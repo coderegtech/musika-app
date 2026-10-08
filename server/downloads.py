@@ -1,6 +1,7 @@
 import asyncio
 import hashlib
 import json
+import logging
 import os
 import shutil
 import sys
@@ -8,6 +9,17 @@ import uuid
 from datetime import datetime, timezone
 from pathlib import Path
 from .domain import DuplicateDetectionService
+
+log = logging.getLogger('musika')
+
+def tool_error(stderr, fallback):
+    """Logs a yt-dlp/FFmpeg failure and returns the message to show users."""
+    lines = [l for l in stderr.decode(errors='replace').splitlines() if l.strip()]
+    detail = lines[-1].strip() if lines else ''
+    log.warning('%s %s', fallback, detail)
+    if 'confirm you' in detail and 'bot' in detail:
+        return "YouTube blocked this server's request with a bot check. Cloud server IPs are often blocked; see README > Troubleshooting."
+    return f'{fallback} {detail[:300]}'.strip()
 
 def ffmpeg_binary():
     configured = os.getenv('FFMPEG_PATH') or shutil.which('ffmpeg')
@@ -95,7 +107,7 @@ class QueueService:
         try:
             _,stderr = await asyncio.wait_for(process.communicate(),timeout=1800)
             if process.returncode:
-                raise RuntimeError('Media processing failed. Check server tools and content availability.')
+                raise RuntimeError(tool_error(stderr,'Media processing failed.'))
         finally:
             if process.returncode is None:
                 process.kill()

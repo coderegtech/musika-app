@@ -9,6 +9,7 @@ import sys
 import time
 from urllib.parse import parse_qs, urlparse
 import httpx
+from .downloads import tool_error
 
 # googlevideo throttles long open-ended reads, so the relay serves bounded
 # chunks; media players request the next range on their own.
@@ -52,8 +53,7 @@ class StreamService:
             process.kill()
             raise RuntimeError('YouTube took too long to respond.')
         if process.returncode or not out.strip():
-            lines = err.decode(errors='replace').strip().splitlines()
-            raise RuntimeError(lines[-1] if lines else 'This track cannot be streamed.')
+            raise RuntimeError(tool_error(err, 'Streaming failed.'))
         info = json.loads(out)
         url = info['url']
         expire = int(parse_qs(urlparse(url).query).get('expire', [time.time() + 3600])[0])
