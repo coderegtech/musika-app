@@ -1073,7 +1073,7 @@ function AppContent() {
                   <Label muted style={{ fontSize: 10 }}>
                     {DEMO
                       ? "A taste of Musika · Fictional artists, original demo audio."
-                      : "Discovery powered by YouTube · Stream the video or save it as MP3."}
+                      : "Discovery powered by YouTube · Play it now or save it as MP3."}
                   </Label>
                 </View>
               </>
