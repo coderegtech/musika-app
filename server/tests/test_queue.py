@@ -1,8 +1,10 @@
 import asyncio
 import json
+import os
 import tempfile
 import unittest
 from pathlib import Path
+from unittest.mock import patch
 from server.database import Database
 from server.downloads import QueueService, tool_error
 
@@ -54,3 +56,13 @@ class QueueTests(unittest.IsolatedAsyncioTestCase):
         self.assertIn('bot check',message)
         with self.assertLogs('musika','WARNING'):
             self.assertEqual(tool_error(b'ERROR: Video unavailable\n','Media processing failed.'),'Media processing failed. ERROR: Video unavailable')
+    async def test_ytdlp_command_adds_operator_cookies_and_proxy(self):
+        from server.downloads import ytdlp_command
+        source=Path(self.temp.name)/'cookies.txt';source.write_text('# Netscape HTTP Cookie File\n')
+        with patch.dict(os.environ,{'YT_DLP_COOKIES_FILE':str(source),'YT_DLP_PROXY':'http://proxy.example:8080'}):
+            command=ytdlp_command()
+        jar=Path(command[command.index('--cookies')+1]);self.addCleanup(jar.unlink,missing_ok=True)
+        self.assertNotEqual(jar,source);self.assertEqual(jar.read_text(),source.read_text())
+        self.assertEqual(command[command.index('--proxy')+1],'http://proxy.example:8080')
+        with patch.dict(os.environ,{'YT_DLP_COOKIES_FILE':'','YT_DLP_PROXY':''}):
+            self.assertFalse({'--cookies','--proxy'} & set(ytdlp_command()))

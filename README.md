@@ -196,7 +196,11 @@ Remote demo artwork is served by Unsplash and needs a connection; downloaded aud
 
 ## Troubleshooting
 
-**Streams return 502 or downloads fail on a cloud host (Render, etc.).** The API logs the real yt-dlp error as a `musika` warning (`Streaming failed. …` / `Media processing failed. …`), and the same text reaches the app. If it says *"Sign in to confirm you're not a bot"*, YouTube is refusing requests from that server's datacenter IP; the same video will usually work from your own machine. The code can't fix that on its own. Your options are to run the API somewhere with a non-datacenter IP (a home server, or a VPS whose IP YouTube doesn't flag) or to route yt-dlp through a proxy.
+**Streams return 502 or downloads fail on a cloud host (Render, etc.).** The API logs the real yt-dlp error as a `musika` warning (`Streaming failed. …` / `Media processing failed. …`), and the same text reaches the app. If it says *"Sign in to confirm you're not a bot"*, YouTube is refusing requests from that server's datacenter IP; the same video will usually work from your own machine. Ways around it, most reliable first:
+
+- **Run the API from home.** Your own connection isn't flagged. Keep the Docker API running on your PC and expose it with [Cloudflare Tunnel](https://developers.cloudflare.com/cloudflare-one/connections/connect-networks/) (free), then point `EXPO_PUBLIC_API_URL` and the Vercel app at the tunnel's HTTPS URL. The catch: the PC has to stay on.
+- **Cookies (`YT_DLP_COOKIES_FILE`).** Sign in to YouTube in a private browser window with a **throwaway** Google account (YouTube can flag accounts used this way), export `cookies.txt` with a "Get cookies.txt LOCALLY"-style extension, then close that window without signing out so the cookies stay valid. On Render: **Environment → Secret Files**, add `youtube-cookies.txt`, and set `YT_DLP_COOKIES_FILE=/etc/secrets/youtube-cookies.txt`. Cookies expire; re-export when the bot check returns.
+- **Proxy (`YT_DLP_PROXY`).** A residential proxy URL such as `http://user:pass@host:port`. Datacenter proxies usually hit the same block.
 
 ## References
 

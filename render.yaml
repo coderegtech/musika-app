@@ -30,6 +30,12 @@ services:
         value: none
       - key: STREAM_SECRET
         generateValue: true
+      # Set to /etc/secrets/youtube-cookies.txt after adding that Secret File,
+      # if YouTube's bot check blocks this server (see README > Troubleshooting).
+      - key: YT_DLP_COOKIES_FILE
+        sync: false
+      - key: YT_DLP_PROXY
+        sync: false
       - key: FIREBASE_PROJECT_ID
         sync: false
       - key: YOUTUBE_API_KEY

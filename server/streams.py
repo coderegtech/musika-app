@@ -5,11 +5,10 @@ import json
 import os
 import re
 import secrets
-import sys
 import time
 from urllib.parse import parse_qs, urlparse
 import httpx
-from .downloads import tool_error
+from .downloads import tool_error, ytdlp_command
 
 # googlevideo throttles long open-ended reads, so the relay serves bounded
 # chunks; media players request the next range on their own.
@@ -41,9 +40,8 @@ class StreamService:
 
     async def extract(self, video_id):
         # Fixed arguments only, as in YtDlpService: no client URLs, cookies or extractor arguments.
-        executable = [os.environ['YT_DLP_PATH']] if os.getenv('YT_DLP_PATH') else [sys.executable, '-m', 'yt_dlp']
         process = await asyncio.create_subprocess_exec(
-            *executable, '--ignore-config', '--no-plugin-dirs', '--no-playlist', '--no-warnings', '--socket-timeout', '30',
+            *ytdlp_command(), '--ignore-config', '--no-plugin-dirs', '--no-playlist', '--no-warnings', '--socket-timeout', '30',
             '--match-filter', '!is_live', '-f', 'bestaudio[ext=m4a]/bestaudio', '-j',
             '--', 'https://www.youtube.com/watch?v=' + video_id,
             stdout=asyncio.subprocess.PIPE, stderr=asyncio.subprocess.PIPE)
