@@ -194,6 +194,10 @@ Live OAuth and YouTube discovery require your own credentials. Native Google log
 
 Remote demo artwork is served by Unsplash and needs a connection; downloaded audio does not. Production artwork caching, storage quotas/retention, richer metadata correction, distributed workers, and app-store release signing remain deployment work.
 
+## Troubleshooting
+
+**Streams return 502 or downloads fail on a cloud host (Render, etc.).** The API logs the real yt-dlp error as a `musika` warning (`Streaming failed. …` / `Media processing failed. …`), and the same text reaches the app. If it says *"Sign in to confirm you're not a bot"*, YouTube is refusing requests from that server's datacenter IP; the same video will usually work from your own machine. The code can't fix that on its own. Your options are to run the API somewhere with a non-datacenter IP (a home server, or a VPS whose IP YouTube doesn't flag) or to route yt-dlp through a proxy.
+
 ## References
 
 - [Expo Audio](https://docs.expo.dev/versions/v54.0.0/sdk/audio/)

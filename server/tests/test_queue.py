@@ -4,7 +4,7 @@ import tempfile
 import unittest
 from pathlib import Path
 from server.database import Database
-from server.downloads import QueueService
+from server.downloads import QueueService, tool_error
 
 def job(i,user='alice'):
     return {'id':f'job{i}','user_id':user,'track':{'id':f'{i:011d}','source':'youtube','title':f'Track {i}','artist':'Artist','duration':200,'thumbnail':''},'state':'QUEUED','progress':0,'format':'mp3','quality':320}
@@ -48,3 +48,9 @@ class QueueTests(unittest.IsolatedAsyncioTestCase):
         import sqlite3
         j=job(3);self.db.save_job(j)
         with self.assertRaises(sqlite3.IntegrityError):self.db.save_job({**j,'id':'another-job'})
+    async def test_tool_error_explains_youtube_bot_check(self):
+        with self.assertLogs('musika','WARNING'):
+            message=tool_error(b"ERROR: [youtube] abc: Sign in to confirm you're not a bot. Use --cookies\n",'Streaming failed.')
+        self.assertIn('bot check',message)
+        with self.assertLogs('musika','WARNING'):
+            self.assertEqual(tool_error(b'ERROR: Video unavailable\n','Media processing failed.'),'Media processing failed. ERROR: Video unavailable')
