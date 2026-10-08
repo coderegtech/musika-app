@@ -5,6 +5,7 @@ import logging
 import os
 import shutil
 import sys
+import tempfile
 import uuid
 from datetime import datetime, timezone
 from pathlib import Path
@@ -21,6 +22,26 @@ def tool_error(stderr, fallback):
         return "YouTube blocked this server's request with a bot check. Cloud server IPs are often blocked; see README > Troubleshooting."
     return f'{fallback} {detail[:300]}'.strip()
 
+def ytdlp_command():
+    """yt-dlp plus the operator's optional cookies/proxy (server config, never client input).
+
+    YouTube answers datacenter IPs with a "confirm you're not a bot" check;
+    signed-in cookies or a residential proxy get past it.
+    """
+    command = [os.environ['YT_DLP_PATH']] if os.getenv('YT_DLP_PATH') else [sys.executable, '-m', 'yt_dlp']
+    cookies = os.getenv('YT_DLP_COOKIES_FILE')
+    if cookies:
+        # yt-dlp rewrites the cookie jar after each run, and secret files (e.g. Render's
+        # /etc/secrets) are read-only, so it works on a private writable copy.
+        jar = Path(tempfile.gettempdir())/'musika-youtube-cookies.txt'
+        if not jar.exists() or jar.stat().st_mtime < Path(cookies).stat().st_mtime:
+            shutil.copyfile(cookies, jar)
+            jar.chmod(0o600)
+        command += ['--cookies', str(jar)]
+    if os.getenv('YT_DLP_PROXY'):
+        command += ['--proxy', os.environ['YT_DLP_PROXY']]
+    return command
+
 def ffmpeg_binary():
     configured = os.getenv('FFMPEG_PATH') or shutil.which('ffmpeg')
     if configured:
@@ -31,8 +52,7 @@ def ffmpeg_binary():
 class YtDlpService:
     async def extract(self, video_id, directory, run):
         # Fixed arguments only; never accepts client URLs, cookies or extractor arguments.
-        executable = [os.environ['YT_DLP_PATH']] if os.getenv('YT_DLP_PATH') else [sys.executable, '-m', 'yt_dlp']
-        await run(executable + ['--ffmpeg-location', ffmpeg_binary(), '--ignore-config', '--no-plugin-dirs', '--no-playlist', '--no-overwrites', '--no-progress', '--no-warnings',
+        await run(ytdlp_command() + ['--ffmpeg-location', ffmpeg_binary(), '--ignore-config', '--no-plugin-dirs', '--no-playlist', '--no-overwrites', '--no-progress', '--no-warnings',
                    '--socket-timeout','30','--retries','2','--max-filesize','200M','--match-filter','duration <= 14400 & !is_live',
                    '-f','bestaudio[ext=m4a]/bestaudio[ext=webm]/bestaudio','-o',str(directory/'source.%(ext)s'),
                    '--','https://www.youtube.com/watch?v='+video_id])
