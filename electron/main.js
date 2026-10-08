@@ -3,6 +3,13 @@ const path = require("path");
 const http = require("http");
 const fs = require("fs");
 
+// Google refuses sign-in from browsers that identify as embedded apps
+// ("This browser or app may not be secure"), so present a plain Chrome UA.
+app.userAgentFallback = app.userAgentFallback.replace(
+  / (musika-desktop|Electron)\/\S+/g,
+  "",
+);
+
 const PORT = 17321;
 const WEB_ROOT = path.join(__dirname, "web");
 const MIME = {
@@ -18,8 +25,11 @@ const MIME = {
   ".ttf": "font/ttf",
 };
 
-// Serves the static Expo web export over http(s)-style localhost instead of
-// file://, since Firebase Auth requires a real (authorized-domain) origin.
+// Serves the static Expo web export over http://localhost instead of file://,
+// since Firebase Auth requires a real origin on its authorized-domain list.
+// "localhost" is on that list by default; "127.0.0.1" is not (it fails with
+// auth/unauthorized-domain), so the window must load the localhost name.
+const ORIGIN = `http://localhost:${PORT}`;
 function serve() {
   return new Promise((resolve) => {
     const server = http.createServer((req, res) => {
@@ -59,7 +69,7 @@ async function createWindow() {
     autoHideMenuBar: true,
     webPreferences: { contextIsolation: true, sandbox: true },
   });
-  win.loadURL(`http://127.0.0.1:${PORT}`);
+  win.loadURL(ORIGIN);
   // Firebase's Google sign-in popup must open in-app so it can post the result
   // back to this window; other external links open in the OS browser.
   win.webContents.setWindowOpenHandler(({ url }) => {
