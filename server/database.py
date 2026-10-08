@@ -17,7 +17,6 @@ class Database:
               CREATE UNIQUE INDEX IF NOT EXISTS one_active_download ON downloads(user_id,video_id) WHERE state IN ('QUEUED','ANALYZING','DOWNLOADING','PROCESSING');
               CREATE TABLE IF NOT EXISTS settings(user_id TEXT NOT NULL,key TEXT NOT NULL,value TEXT NOT NULL,PRIMARY KEY(user_id,key));
               CREATE TABLE IF NOT EXISTS download_history(id INTEGER PRIMARY KEY,job_id TEXT,state TEXT,created_at TEXT DEFAULT CURRENT_TIMESTAMP);
-              CREATE TABLE IF NOT EXISTS authorized_videos(video_id TEXT PRIMARY KEY,added_by TEXT NOT NULL,added_at TEXT DEFAULT CURRENT_TIMESTAMP);
             ''')
 
     @contextmanager
@@ -51,19 +50,3 @@ class Database:
         with self.connect() as db:
             row = db.execute("SELECT value FROM settings WHERE user_id=? AND key='paused'", (user,)).fetchone()
             return row is not None and row['value'] == 'true'
-
-    def authorized_videos(self):
-        with self.connect() as db:
-            return [dict(row) for row in db.execute('SELECT video_id,added_by,added_at FROM authorized_videos ORDER BY added_at DESC')]
-
-    def add_authorized(self, video_id, added_by):
-        with self.connect() as db:
-            db.execute('INSERT OR REPLACE INTO authorized_videos(video_id,added_by) VALUES(?,?)', (video_id, added_by))
-
-    def remove_authorized(self, video_id):
-        with self.connect() as db:
-            db.execute('DELETE FROM authorized_videos WHERE video_id=?', (video_id,))
-
-    def is_authorized(self, video_id):
-        with self.connect() as db:
-            return db.execute('SELECT 1 FROM authorized_videos WHERE video_id=?', (video_id,)).fetchone() is not None

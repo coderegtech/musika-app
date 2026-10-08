@@ -4,6 +4,8 @@ FROM python:3.12-slim
 # downloads.py, so the image starts instantly with no runtime download.
 RUN apt-get update && apt-get install -y --no-install-recommends ffmpeg \
     && rm -rf /var/lib/apt/lists/*
+# yt-dlp runs YouTube's player JavaScript with deno; without it formats can go missing.
+COPY --from=denoland/deno:bin-2.5.6 /deno /usr/local/bin/deno
 
 WORKDIR /app
 # Copied into app/server (not flattened into /app) so the package's own

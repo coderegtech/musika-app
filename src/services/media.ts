@@ -3,6 +3,7 @@ import { Asset } from "expo-asset";
 import * as FileSystem from "expo-file-system/legacy";
 import { Track, API } from "../models";
 import { authHeaders } from "./auth";
+import { request } from "./api";
 const audioAssets = [
   require("../../assets/demo-0.wav"),
   require("../../assets/demo-1.wav"),
@@ -26,10 +27,12 @@ async function storeBlob(id: string, blob: Blob) {
   });
   db.close();
 }
+// Plays the downloaded copy when there is one, otherwise streams the audio
+// through the server (it relays YouTube's audio-only stream, no video).
 export async function audioUri(track: Track): Promise<string> {
   if (Platform.OS !== "web") {
     if (track.localUri) return track.localUri;
-    throw new Error("Save this track to your library first.");
+    return streamUri(track);
   }
   const db = await blobDb();
   const blob = await new Promise<Blob | undefined>((resolve, reject) => {
@@ -38,11 +41,18 @@ export async function audioUri(track: Track): Promise<string> {
     r.onerror = () => reject(r.error);
   });
   db.close();
-  if (!blob)
+  if (blob) return URL.createObjectURL(blob);
+  if (track.localUri)
     throw new Error(
       "Offline audio is missing. Remove this track and download it again.",
     );
-  return URL.createObjectURL(blob);
+  return streamUri(track);
+}
+async function streamUri(track: Track): Promise<string> {
+  if (track.source !== "youtube")
+    throw new Error("Save this track to your library first.");
+  const { url } = await request<{ url: string }>(`/stream/${track.id}`);
+  return API + url;
 }
 export async function saveAudio(track: Track): Promise<Track> {
   const asset =
