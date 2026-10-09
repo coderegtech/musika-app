@@ -78,7 +78,9 @@ export default function Player() {
   const [expanded, setExpanded] = useState(false),
     [showQueue, setShowQueue] = useState(false),
     [volume, setVolume] = useState(0.65),
-    [ready, setReady] = useState(false);
+    [ready, setReady] = useState(false),
+    [failed, setFailed] = useState(false),
+    [attempt, setAttempt] = useState(0);
   const player = useAudioPlayer(null, { updateInterval: 250 });
   const status = useAudioPlayerStatus(player);
   const current = s.current;
@@ -94,6 +96,7 @@ export default function Player() {
   useEffect(() => {
     let cancelled = false;
     setReady(false);
+    setFailed(false);
     player.pause();
     if (!current) {
       player.replace(null);
@@ -116,6 +119,7 @@ export default function Player() {
           media?.addEventListener("error", () => {
             if (cancelled) return;
             setReady(false);
+            setFailed(true);
             s.setPlaying(false);
             s.notify("This track could not be played. Try again later.");
           });
@@ -125,15 +129,22 @@ export default function Player() {
         showNowPlaying(current);
       })
       .catch((e) => {
+        if (cancelled) return;
+        setFailed(true);
         s.notify(e.message);
         s.setPlaying(false);
       });
     return () => {
       cancelled = true;
     };
-  }, [current?.id, current?.localUri]);
+  }, [current?.id, current?.localUri, attempt]);
   useEffect(() => {
-    if (!ready) return;
+    // Pressing play after a failed load retries it; the track hasn't changed,
+    // so nothing else would reload the source.
+    if (!ready) {
+      if (s.playing && failed) setAttempt((n) => n + 1);
+      return;
+    }
     if (s.playing) {
       if (status.didJustFinish) void player.seekTo(0);
       player.play();
