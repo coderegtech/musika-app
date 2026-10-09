@@ -3,63 +3,53 @@ import hashlib
 import json
 import logging
 import os
-import shutil
-import sys
-import tempfile
 import uuid
 from datetime import datetime, timezone
 from pathlib import Path
 from .domain import DuplicateDetectionService
+from .ytdlp import YtDlpError, ffmpeg_binary, redact, runner
 
 log = logging.getLogger('musika')
 
 def tool_error(stderr, fallback):
-    """Logs a yt-dlp/FFmpeg failure and returns the message to show users."""
+    """Logs an FFmpeg failure and returns the message to show users."""
     lines = [l for l in stderr.decode(errors='replace').splitlines() if l.strip()]
-    detail = lines[-1].strip() if lines else ''
+    detail = redact(lines[-1].strip()) if lines else ''
     log.warning('%s %s', fallback, detail)
-    if 'confirm you' in detail and 'bot' in detail:
-        return "YouTube blocked this server's request with a bot check. Cloud server IPs are often blocked; see README > Troubleshooting."
     return f'{fallback} {detail[:300]}'.strip()
 
-def ytdlp_command():
-    """yt-dlp plus the operator's optional cookies/proxy (server config, never client input).
-
-    YouTube answers datacenter IPs with a "confirm you're not a bot" check;
-    signed-in cookies or a residential proxy get past it.
-    """
-    command = [os.environ['YT_DLP_PATH']] if os.getenv('YT_DLP_PATH') else [sys.executable, '-m', 'yt_dlp']
-    cookies = os.getenv('YT_DLP_COOKIES_FILE')
-    if cookies:
-        # yt-dlp rewrites the cookie jar after each run, and secret files (e.g. Render's
-        # /etc/secrets) are read-only, so it works on a private writable copy.
-        jar = Path(tempfile.gettempdir())/'musika-youtube-cookies.txt'
-        if not jar.exists() or jar.stat().st_mtime < Path(cookies).stat().st_mtime:
-            shutil.copyfile(cookies, jar)
-            jar.chmod(0o600)
-        command += ['--cookies', str(jar)]
-    if os.getenv('YT_DLP_PROXY'):
-        command += ['--proxy', os.environ['YT_DLP_PROXY']]
-    return command
-
-def ffmpeg_binary():
-    configured = os.getenv('FFMPEG_PATH') or shutil.which('ffmpeg')
-    if configured:
-        return configured
-    import imageio_ffmpeg
-    return imageio_ffmpeg.get_ffmpeg_exe()
-
 class YtDlpService:
-    async def extract(self, video_id, directory, run):
+    def __init__(self, runner=runner):
+        self.runner = runner
+
+    async def extract(self, video_id, directory, run=None):
         # Fixed arguments only; never accepts client URLs, cookies or extractor arguments.
-        await run(ytdlp_command() + ['--ffmpeg-location', ffmpeg_binary(), '--ignore-config', '--no-plugin-dirs', '--no-playlist', '--no-overwrites', '--no-progress', '--no-warnings',
-                   '--socket-timeout','30','--retries','2','--max-filesize','200M','--match-filter','duration <= 14400 & !is_live',
-                   '-f','bestaudio[ext=m4a]/bestaudio[ext=webm]/bestaudio','-o',str(directory/'source.%(ext)s'),
-                   '--','https://www.youtube.com/watch?v='+video_id])
-        files = [p for p in directory.glob('source.*') if p.suffix not in ('.part','.ytdl')]
-        if len(files) != 1:
+        args = ['--ffmpeg-location', ffmpeg_binary(), '--no-overwrites', '--no-progress', '--retries', '2', '--max-filesize', '200M',
+                '--match-filter', 'duration <= 14400 & !is_live', '-f', 'bestaudio[ext=m4a]/bestaudio[ext=webm]/bestaudio',
+                '-o', str(directory/'source.%(ext)s')]
+        info = self.runner.cached_info(video_id)
+        if info:
+            # Playing the track already extracted it; reuse that instead of asking YouTube again.
+            cached = directory/'info.json'
+            cached.write_text(json.dumps(info))
+            try:
+                await self.runner.run(args + ['--load-info-json', str(cached)], video_id=video_id, purpose='download-cached', timeout=1800, attempts=1)
+            except YtDlpError as error:
+                if error.kind in ('bot_check', 'rate_limited'): raise
+                self.runner.info.pop(video_id, None)
+            finally:
+                cached.unlink(missing_ok=True)
+        if not self.source(directory):
+            await self.runner.run(args + ['--', 'https://www.youtube.com/watch?v='+video_id], video_id=video_id, purpose='download', timeout=1800)
+        source = self.source(directory)
+        if not source:
             raise RuntimeError('Audio extraction did not produce a file.')
-        return files[0]
+        return source
+
+    @staticmethod
+    def source(directory):
+        files = [p for p in directory.glob('source.*') if p.suffix not in ('.part','.ytdl')]
+        return files[0] if len(files) == 1 else None
 
 class FFmpegService:
     async def process(self, source, output, track, quality, run):

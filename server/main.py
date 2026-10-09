@@ -1,6 +1,7 @@
 import asyncio
 import hashlib
 import json
+import logging
 import os
 import secrets
 import sqlite3
@@ -20,8 +21,13 @@ from .domain import VIDEO_ID, DuplicateDetectionService
 from .downloads import QueueService, log
 from .streams import StreamService
 from .youtube import YouTubeService
+from .ytdlp import YtDlpError, runner
 
 load_dotenv(Path(__file__).parent/'.env')
+# uvicorn only configures its own loggers; this makes the app's diagnostics visible.
+logging.basicConfig(level=os.getenv('LOG_LEVEL','INFO').upper(),format='%(asctime)s %(levelname)s %(name)s %(message)s')
+# httpx logs every request URL at INFO, and signed googlevideo URLs carry this server's IP.
+logging.getLogger('httpx').setLevel(logging.WARNING)
 ROOT = Path(__file__).parent/'data'
 db = Database(ROOT/'musika.db')
 youtube = YouTubeService()
@@ -115,7 +121,14 @@ def logout(request:Request,response:Response,user=Depends(session)):
     return {'ok':True}
 
 @app.get('/health')
-def health(): return {'ok':True,'discovery_configured':bool(os.getenv('YOUTUBE_API_KEY'))}
+def health():
+    # Always 200 while the process serves requests, so a YouTube block doesn't make
+    # the host restart the service; `extractor.status` reports the block instead.
+    return {'ok':True,'discovery_configured':bool(os.getenv('YOUTUBE_API_KEY')),'extractor':runner.health()}
+
+def youtube_error(error:YtDlpError):
+    headers = {'Retry-After':str(error.retry_after)} if error.retry_after else None
+    return HTTPException(error.status,str(error),headers=headers)
 
 @app.get('/music/search')
 async def search(q:str='',page:str='',kind:str='tracks',user=Depends(session)):
@@ -144,6 +157,9 @@ class DownloadRequest(BaseModel):
 
 @app.post('/downloads')
 async def download(body:DownloadRequest,user=Depends(session)):
+    # Refuse up front while YouTube is blocking this server rather than queueing a job that will fail.
+    try: runner.check_blocked(body.video_id)
+    except YtDlpError as error: raise youtube_error(error)
     track = await youtube.getMusicMetadata(body.video_id)
     if track['classification']=='NOT_MUSIC': raise HTTPException(400,'This video is not classified as music.')
     duplicate = DuplicateDetectionService.check(track,db.tracks(user))
@@ -202,18 +218,24 @@ def media(video_id:str,user=Depends(session)):
     return FileResponse(path,filename=path.name,media_type={'mp3':'audio/mpeg','m4a':'audio/mp4','opus':'audio/ogg'}[track['format']])
 
 @app.get('/stream/{video_id}')
-def stream_link(video_id:str,user=Depends(session)):
+async def stream_link(video_id:str,user=Depends(session)):
     # Media players can't attach the session header, so they get a short-lived signed URL instead.
     if not VIDEO_ID.fullmatch(video_id): raise HTTPException(400,'Invalid YouTube video ID.')
+    try: runner.check_blocked(video_id)
+    except YtDlpError as error: raise youtube_error(error)
+    # Start resolving now so the player's first audio request doesn't wait for yt-dlp.
+    task = asyncio.ensure_future(streams.resolve(video_id))
+    task.add_done_callback(lambda t: t.cancelled() or t.exception())
     return {'url':streams.link(video_id)}
 
 @app.get('/stream/{video_id}/audio')
 async def stream_audio(video_id:str,exp:int,sig:str,request:Request):
     if not VIDEO_ID.fullmatch(video_id) or not streams.verify(video_id,exp,sig): raise HTTPException(403,'This stream link is invalid or expired.')
     try: upstream,start,end,info = await streams.open(video_id,request.headers.get('range'))
+    except YtDlpError as error: raise youtube_error(error)
     except (RuntimeError,ValueError,KeyError) as error:
-        log.warning('stream %s failed: %s',video_id,error)
-        raise HTTPException(502,str(error) if isinstance(error,RuntimeError) else 'This track cannot be streamed right now.')
+        log.warning('event=stream.failure video=%s error=%s',video_id,type(error).__name__)
+        raise HTTPException(502,'This track cannot be streamed right now.')
     if upstream is None: return Response(status_code=416,headers={'Content-Range':f"bytes */{info['size']}"})
     headers = {'Accept-Ranges':'bytes','Cache-Control':'private, max-age=3600'}
     for name in ('content-length','content-range'):

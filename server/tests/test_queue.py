@@ -50,19 +50,8 @@ class QueueTests(unittest.IsolatedAsyncioTestCase):
         import sqlite3
         j=job(3);self.db.save_job(j)
         with self.assertRaises(sqlite3.IntegrityError):self.db.save_job({**j,'id':'another-job'})
-    async def test_tool_error_explains_youtube_bot_check(self):
+    async def test_tool_error_reports_ffmpeg_failures_redacted(self):
         with self.assertLogs('musika','WARNING'):
-            message=tool_error(b"ERROR: [youtube] abc: Sign in to confirm you're not a bot. Use --cookies\n",'Streaming failed.')
-        self.assertIn('bot check',message)
-        with self.assertLogs('musika','WARNING'):
-            self.assertEqual(tool_error(b'ERROR: Video unavailable\n','Media processing failed.'),'Media processing failed. ERROR: Video unavailable')
-    async def test_ytdlp_command_adds_operator_cookies_and_proxy(self):
-        from server.downloads import ytdlp_command
-        source=Path(self.temp.name)/'cookies.txt';source.write_text('# Netscape HTTP Cookie File\n')
-        with patch.dict(os.environ,{'YT_DLP_COOKIES_FILE':str(source),'YT_DLP_PROXY':'http://proxy.example:8080'}):
-            command=ytdlp_command()
-        jar=Path(command[command.index('--cookies')+1]);self.addCleanup(jar.unlink,missing_ok=True)
-        self.assertNotEqual(jar,source);self.assertEqual(jar.read_text(),source.read_text())
-        self.assertEqual(command[command.index('--proxy')+1],'http://proxy.example:8080')
-        with patch.dict(os.environ,{'YT_DLP_COOKIES_FILE':'','YT_DLP_PROXY':''}):
-            self.assertFalse({'--cookies','--proxy'} & set(ytdlp_command()))
+            message=tool_error(b'Error opening https://user:secret@proxy.example/x?sig=abc\n','Media processing failed.')
+        self.assertTrue(message.startswith('Media processing failed.'))
+        self.assertNotIn('secret',message);self.assertNotIn('sig=abc',message)

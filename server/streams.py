@@ -8,7 +8,7 @@ import secrets
 import time
 from urllib.parse import parse_qs, urlparse
 import httpx
-from .downloads import tool_error, ytdlp_command
+from .ytdlp import LRUCache, YtDlpError, env_int, runner
 
 # googlevideo throttles long open-ended reads, so the relay serves bounded
 # chunks; media players request the next range on their own.
@@ -24,7 +24,8 @@ class StreamService:
 
     def __init__(self, secret=None):
         self.secret = (secret or os.getenv('STREAM_SECRET') or secrets.token_hex(32)).encode()
-        self.cache = {}
+        self.runner = runner
+        self.cache = LRUCache(200)
         self.pending = {}
         self.client = httpx.AsyncClient(timeout=httpx.Timeout(30, read=60), follow_redirects=True)
 
@@ -40,19 +41,14 @@ class StreamService:
 
     async def extract(self, video_id):
         # Fixed arguments only, as in YtDlpService: no client URLs, cookies or extractor arguments.
-        process = await asyncio.create_subprocess_exec(
-            *ytdlp_command(), '--ignore-config', '--no-plugin-dirs', '--no-playlist', '--no-warnings', '--socket-timeout', '30',
-            '--match-filter', '!is_live', '-f', 'bestaudio[ext=m4a]/bestaudio', '-j',
-            '--', 'https://www.youtube.com/watch?v=' + video_id,
-            stdout=asyncio.subprocess.PIPE, stderr=asyncio.subprocess.PIPE)
-        try:
-            out, err = await asyncio.wait_for(process.communicate(), 90)
-        except asyncio.TimeoutError:
-            process.kill()
-            raise RuntimeError('YouTube took too long to respond.')
-        if process.returncode or not out.strip():
-            raise RuntimeError(tool_error(err, 'Streaming failed.'))
+        # Interactive, so fewer and shorter attempts than downloads.
+        out = await self.runner.run(['--match-filter', '!is_live', '-f', 'bestaudio[ext=m4a]/bestaudio', '-j',
+                                     '--', 'https://www.youtube.com/watch?v=' + video_id],
+                                    video_id=video_id, purpose='stream', timeout=env_int('YT_DLP_TIMEOUT', 60), attempts=2)
+        if not out.strip():
+            raise YtDlpError('unavailable', 'This video is unavailable on YouTube (private, removed, live or region-locked).', 404)
         info = json.loads(out)
+        self.runner.remember(video_id, info)
         url = info['url']
         expire = int(parse_qs(urlparse(url).query).get('expire', [time.time() + 3600])[0])
         return {
@@ -94,13 +90,18 @@ class StreamService:
             if info['size'] and start >= info['size']:
                 return None, start, end, info
             request = self.client.build_request('GET', info['url'], headers={**info['headers'], 'Range': f'bytes={start}-{end}'})
-            upstream = await self.client.send(request, stream=True)
+            try:
+                upstream = await self.client.send(request, stream=True)
+            except httpx.TimeoutException:
+                raise YtDlpError('timeout', 'YouTube took too long to respond. Try again.', 504)
+            except httpx.HTTPError:
+                raise YtDlpError('network', "The server couldn't reach YouTube. Try again.")
             if upstream.status_code in (200, 206):
                 return upstream, start, end, info
             await upstream.aclose()
             # 403/410 means the signed URL expired or was revoked: resolve once more.
             self.cache.pop(video_id, None)
-        raise RuntimeError('YouTube refused the stream.')
+        raise YtDlpError('forbidden', 'YouTube refused the audio stream. Try again in a moment.')
 
     async def close(self):
         await self.client.aclose()
