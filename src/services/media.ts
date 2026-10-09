@@ -52,6 +52,19 @@ async function streamUri(track: Track): Promise<string> {
   if (track.source !== "youtube")
     throw new Error("Save this track to your library first.");
   const { url } = await request<{ url: string }>(`/stream/${track.id}`);
+  // Media players only report "no supported source", so fetch the first byte
+  // ourselves to surface the server's reason (e.g. YouTube's bot check). The
+  // server caches the resolved stream, so the player's request reuses it.
+  const probe = await fetch(API + url, { headers: { Range: "bytes=0-0" } });
+  if (!probe.ok) {
+    const e = await probe.json().catch(() => ({}));
+    throw new Error(
+      typeof e.detail === "string"
+        ? e.detail
+        : "This track cannot be streamed right now.",
+    );
+  }
+  void probe.body?.cancel().catch(() => {});
   return API + url;
 }
 export async function saveAudio(track: Track): Promise<Track> {

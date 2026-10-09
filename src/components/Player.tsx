@@ -109,6 +109,17 @@ export default function Player() {
           URL.revokeObjectURL(uriRef.current);
         uriRef.current = uri;
         player.replace({ uri });
+        // expo-audio's web player ignores the <audio> element's errors, so a
+        // failed load would leave the UI showing "playing" with no sound.
+        if (Platform.OS === "web") {
+          const media: HTMLAudioElement | undefined = (player as any).media;
+          media?.addEventListener("error", () => {
+            if (cancelled) return;
+            setReady(false);
+            s.setPlaying(false);
+            s.notify("This track could not be played. Try again later.");
+          });
+        }
         completed.current = false;
         setReady(true);
         showNowPlaying(current);
