@@ -30,11 +30,16 @@ services:
         value: none
       - key: STREAM_SECRET
         generateValue: true
-      # Set to /etc/secrets/youtube-cookies.txt after adding that Secret File,
-      # if YouTube's bot check blocks this server (see README > Troubleshooting).
+      # Optional yt-dlp settings for when YouTube blocks this server; see
+      # docs/deployment.md > "When YouTube blocks the server". Leave blank if unused.
+      # Cookies: add Secret File youtube-cookies.txt, then set /etc/secrets/youtube-cookies.txt.
       - key: YT_DLP_COOKIES_FILE
         sync: false
       - key: YT_DLP_PROXY
+        sync: false
+      - key: YT_DLP_POT_PROVIDER_URL
+        sync: false
+      - key: YT_DLP_EXTRACTOR_ARGS
         sync: false
       - key: FIREBASE_PROJECT_ID
         sync: false

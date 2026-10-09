@@ -112,6 +112,10 @@ It reads `server/.env` (via `env_file`) — the same file the venv-based run abo
 
 Browsers that block third-party cookies (Safari, or Chrome with that setting on) won't keep a web session across the two sites. If that matters, give both a shared custom domain (e.g. `app.example.com` on Vercel, `api.example.com` on Render) and set `COOKIE_SAMESITE=lax`. The native apps use bearer tokens and aren't affected.
 
+### Deploy the API to Railway
+
+Set the service's Root Directory to `/server`, its config file to `/server/railway.json`, and add a volume at `/app/server/data`. Full steps and every environment variable: [docs/deployment.md](docs/deployment.md#deploy-the-api-on-railway).
+
 ## Personal builds (Android APK / Windows desktop)
 
 Building your own APK or desktop app for personal use needs no Play Store, App Store, or code-signing certificate — those are only required to *publish* through a store.
@@ -196,11 +200,7 @@ Remote demo artwork is served by Unsplash and needs a connection; downloaded aud
 
 ## Troubleshooting
 
-**Streams return 502 or downloads fail on a cloud host (Render, etc.).** The API logs the real yt-dlp error as a `musika` warning (`Streaming failed. …` / `Media processing failed. …`), and the same text reaches the app. If it says *"Sign in to confirm you're not a bot"*, YouTube is refusing requests from that server's datacenter IP; the same video will usually work from your own machine. Ways around it, most reliable first:
-
-- **Run the API from home.** Your own connection isn't flagged. Keep the Docker API running on your PC and expose it with [Cloudflare Tunnel](https://developers.cloudflare.com/cloudflare-one/connections/connect-networks/) (free), then point `EXPO_PUBLIC_API_URL` and the Vercel app at the tunnel's HTTPS URL. The catch: the PC has to stay on. Step-by-step: [docs/cloudflare-tunnel.md](docs/cloudflare-tunnel.md).
-- **Cookies (`YT_DLP_COOKIES_FILE`).** Sign in to YouTube in a private browser window with a **throwaway** Google account (YouTube can flag accounts used this way), export `cookies.txt` with a "Get cookies.txt LOCALLY"-style extension, then close that window without signing out so the cookies stay valid. On Render: **Environment → Secret Files**, add `youtube-cookies.txt`, and set `YT_DLP_COOKIES_FILE=/etc/secrets/youtube-cookies.txt`. Cookies expire; re-export when the bot check returns.
-- **Proxy (`YT_DLP_PROXY`).** A residential proxy URL such as `http://user:pass@host:port`. Datacenter proxies usually hit the same block.
+**Play or download fails on a cloud host (Render, Railway, etc.).** Check `GET /health`: `extractor.status` shows whether the server is in a cooldown after a YouTube bot check or rate limit, and whether yt-dlp, FFmpeg and Deno are present. The API logs every yt-dlp run as an `event=ytdlp.*` line with a classified `kind` (`bot_check`, `rate_limited`, `unavailable`, `extractor`, …). YouTube often blocks datacenter IPs; [docs/deployment.md > When YouTube blocks the server](docs/deployment.md#when-youtube-blocks-the-server) walks through rebuilding yt-dlp, cookies, a PO Token provider, a proxy, and running the API from home with [Cloudflare Tunnel](docs/cloudflare-tunnel.md). None of these is guaranteed to work.
 
 ## References
 

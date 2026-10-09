@@ -2,7 +2,12 @@ fastapi>=0.115,<1
 uvicorn>=0.34,<1
 google-auth>=2.38,<3
 requests>=2.32,<3
-yt-dlp[default]>=2025.3
+# [default] includes yt-dlp-ejs, which solves YouTube's JS challenges with deno.
+# YouTube changes often: rebuild the image regularly to pick up new releases.
+yt-dlp[default]>=2025.11.12
+# Optional PO Token provider plugin; inactive unless YT_DLP_POT_PROVIDER_URL is set.
+# Its major version must match the provider server's image tag.
+bgutil-ytdlp-pot-provider==2.0.0
 python-dotenv>=1.0,<2
 httpx>=0.28,<1
 imageio-ffmpeg>=0.6,<1

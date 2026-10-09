@@ -34,5 +34,14 @@ services:
       - api
     profiles: [quick-tunnel]
 
+  # Optional PO Token provider for yt-dlp. Set YT_DLP_POT_PROVIDER_URL=http://pot-provider:4416
+  # in server/.env; the tag's major version must match bgutil-ytdlp-pot-provider in requirements.txt.
+  #   docker compose --profile pot up -d
+  pot-provider:
+    image: brainicism/bgutil-ytdlp-pot-provider:2.0.0
+    init: true
+    restart: unless-stopped
+    profiles: [pot]
+
 volumes:
   musika_data:
