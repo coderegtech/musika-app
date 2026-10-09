@@ -8,6 +8,31 @@ services:
       - ./server/.env
     volumes:
       - musika_data:/app/server/data
+    restart: unless-stopped
+
+  # Public HTTPS URL for the API through Cloudflare, so YouTube sees this
+  # machine's home IP instead of a blocked cloud one (docs/cloudflare-tunnel.md).
+  # Named tunnel: fixed hostname; TUNNEL_TOKEN comes from the root .env.
+  #   docker compose --profile tunnel up -d
+  tunnel:
+    image: cloudflare/cloudflared:2026.9.1
+    command: tunnel --no-autoupdate run
+    environment:
+      TUNNEL_TOKEN: ${TUNNEL_TOKEN:?Set TUNNEL_TOKEN in .env (see docs/cloudflare-tunnel.md)}
+    depends_on:
+      - api
+    restart: unless-stopped
+    profiles: [tunnel]
+
+  # Quick tunnel for testing: random *.trycloudflare.com URL that changes on
+  # every restart. Find it with: docker compose logs quick-tunnel
+  #   docker compose --profile quick-tunnel up -d
+  quick-tunnel:
+    image: cloudflare/cloudflared:2026.9.1
+    command: tunnel --no-autoupdate --url http://api:8000
+    depends_on:
+      - api
+    profiles: [quick-tunnel]
 
 volumes:
   musika_data:
